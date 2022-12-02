@@ -12,6 +12,16 @@ TENSOR_COUNTER = 0
 from .backend_selection import Device, array_api, NDArray, default_device
 
 
+def _encode_digits_alphabetic(n):
+    if n == -1:
+        return '*'
+    s = ''
+    while len(s) == 0 or n:
+        n, i = n // 26, n % 26
+        s = chr(97 + i % 26) + s
+    return s
+
+
 class Op:
     """Operator definition."""
 
@@ -164,10 +174,17 @@ class Value:
         data = self.realize_cached_data()
         if array_api is numpy:
             return data
-        return data.numpy() if not isinstance(data, tuple) else [x.numpy() for x in data]
+        return (data.numpy()
+                if not isinstance(data, tuple) else [x.numpy() for x in data])
+
+    def name(self):
+        return _encode_digits_alphabetic(self.uuid)
 
     def __str__(self):
-        return f"Value({self.uuid})"
+        type_name = "Value"
+        if isinstance(self, Tensor):
+            type_name = "Tensor"
+        return f"{type_name}({self.name()})"
 
     def __repr__(self):
         return self.__str__()

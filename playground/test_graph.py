@@ -43,9 +43,7 @@ ndl.Tensor.__repr__ = ndl.Value.__repr__
 h: ndl.Tensor
 
 # check topo order
-for node in graph.nodes:
-    print(node, node.inputs)
-print(graph.topo_order())
+print(graph)
 
 # check graph.exec's correctness
 assert all(node.cached_data is None for node in graph.nodes)

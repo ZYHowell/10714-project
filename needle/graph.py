@@ -5,6 +5,42 @@ from needle.autograd import Op, Tensor, Value
 from needle.ops import make_tuple, tuple_get_item
 from needle.utils import OrderedSet
 
+indent_len = 4
+
+
+def get_indent():
+    return " " * indent_len
+
+
+def pp_shape(data):
+    dtype = str(data.dtype)
+    d_str = ""
+    if "float" in dtype:
+        d_str = "f"
+    elif "int" in dtype:
+        d_str = "i"
+    elif "bool" in dtype:
+        d_str = "pred"
+    else:
+        raise NotImplementedError(f"unsupported dtype {dtype}")
+    if "32" in dtype:
+        d_str += "32"
+    elif "16" in dtype:
+        d_str += "16"
+    elif "8" in dtype:
+        d_str += "8"
+    elif "bool" in dtype:
+        pass
+    else:
+        raise NotImplementedError(f"unsupported dtype {dtype}")
+    s_str = "["
+    for d in data.shape:
+        s_str += str(d) + ","
+    if len(s_str) > 1:
+        s_str = s_str[:-1]
+    s_str += "]"
+    return d_str + s_str
+
 
 class Graph:
 
@@ -50,7 +86,7 @@ class Graph:
     def exec(self, *args):
         val_map = {}
         assert len(args) == len(self.params)
-        
+
         def map_or_cached(val: Value):
             if val in self.params or val in self.nodes:
                 return val_map[val]
@@ -64,6 +100,41 @@ class Graph:
             if t not in val_map:
                 val_map[t] = t.op.compute(*[map_or_cached(i) for i in t.inputs])
         return val_map[self.root]
+
+    def pp_graph(self):
+        param_str = "params: "
+        for param in self.params:
+            param_str += param.name() + f" {pp_shape(param.cached_data)}" + ", "
+        if len(self.params) > 0:
+            param_str = param_str[:-1]
+        param_dict = {p: idx for idx, p in enumerate(self.params)}
+
+        eqn_str = "eqns:"
+        for node in self.topo_order():
+            cur_eqn_str = f"\n{get_indent()}"
+            cur_eqn_str += node.name() + " = "
+            if node in param_dict:
+                cur_eqn_str += f"Parameter({param_dict[node]})"
+                eqn_str += cur_eqn_str
+                continue
+
+            # The op name is just a hack.
+            op_name = str(type(node.op))
+            op_name = op_name[len("<class 'needle.ops."):-2]
+            cur_eqn_str += op_name + " ("
+            for inv in node.inputs:
+                cur_eqn_str += inv.name() + ", "
+            if len(node.inputs) > 0:
+                cur_eqn_str = cur_eqn_str[:-2]
+            cur_eqn_str += ")"
+            eqn_str += cur_eqn_str
+
+        root_str = "root var: " + self.root.name()
+        ret_str = "{\n" + param_str + "\n" + eqn_str + "\n" + root_str + "\n}"
+        return ret_str
+
+    def __str__(self):
+        return self.pp_graph()
 
 
 class Fused(Op):
@@ -112,19 +183,28 @@ def replace_all_use_with(origin: Value, new: Value, graph: Graph):
                 user.inputs[idx] = new
 
 
-# Given a subgraph, replace it by a fused operator. Then replace all use
-def _replace_nodes_by_fused_op(graph):
-    pass
-
 # A fused operator may have multiple outputs. We add a tuple operator and get
 # its elements as the original outputs
-def _add_tuple_and_get_elements():
+def _add_tuple_and_get_elements(*args):
+    t = make_tuple(*args)
+    return tuple(tuple_get_item(t, i) for i in range(len(args)))
+
+
+# Given a subgraph, replace it by a fused operator. Then replace all use
+def _replace_nodes_by_fused_op(subgraph, graph):
     pass
+
 
 # version 1: An elementwise unary op after any op
-def pattern_matching_unary(graph):
+def pattern_matching_single_unary(graph):
     pass
 
+
 # version 2: A series of elementwise unary ops after any op
+def pattern_matching_unarys(graph):
+    pass
+
 
 # version 3: Add elementwise binary ops as well
+def pattern_matching_elementwise(graph):
+    pass
