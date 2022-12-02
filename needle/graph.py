@@ -1,5 +1,5 @@
 from queue import Queue
-from typing import Dict, Sequence
+from typing import Callable, Dict, Sequence
 
 from needle.autograd import Op, Tensor, Value
 from needle.ops import make_tuple, tuple_get_item
@@ -13,6 +13,8 @@ def get_indent():
 
 
 def pp_shape(data):
+    if data is None:
+        return "?"
     dtype = str(data.dtype)
     d_str = ""
     if "float" in dtype:
@@ -46,12 +48,13 @@ class Graph:
 
     def __init__(self, root):
         self.root = root
-        self.users: Dict[Value, set[Value]] = {}
+        self.users: Dict[Value, set[Value]] = {root: set()}
         self.nodes = OrderedSet()
         self.params = OrderedSet()
 
         self.nodes.add(root)
 
+    # Graph construction
     def add_user(self, src, user):
         if src not in self.users:
             self.users[src] = set()
@@ -67,7 +70,8 @@ class Graph:
 
     def topo_order(self) -> Sequence[Value]:
         order = OrderedSet()
-        use_count = {n: len(n.inputs) for n in list(self.nodes)}
+        # we add set() here for the b = a + a case.
+        use_count = {n: len(set(n.inputs)) for n in list(self.nodes)}
         q = Queue()
         for p in self.params:
             q.put(p)
@@ -93,7 +97,7 @@ class Graph:
             return val.realize_cached_data()
 
         for p, v in zip(self.params, args):
-            val_map[p] = v.realize_cached_data()
+            val_map[p] = v
 
         topo_order = self.topo_order()
         for t in topo_order:
@@ -101,6 +105,52 @@ class Graph:
                 val_map[t] = t.op.compute(*[map_or_cached(i) for i in t.inputs])
         return val_map[self.root]
 
+    def __call__(self, *args):
+        return self.exec(*[arg.realize_cached_data() for arg in args])
+
+    # Graph modification
+    def replace_all_use_with(self, origin: Value, new: Value):
+        """
+        Replace a node in the original graph by a new one.
+        Cannot replace a parameter.
+        """
+        assert origin in self.nodes
+        for user in list(self.users[origin]):
+            for idx in range(len(user.inputs)):
+                if user.inputs[idx] == origin:
+                    user.inputs[idx] = new
+        self.users[new] = self.users[origin]
+        self.nodes.add(new)
+        self.users[origin].clear()
+        if self.root == origin:
+            self.root = new
+
+    def remove_node(self, node: Value):
+        assert self.root != node
+        self.users.pop(node)
+        self.nodes.remove(node)
+        for invar in node.inputs:
+            if invar in self.nodes:
+                self.users[invar].discard(node)
+
+    # Given a subgraph, replace it by a fused operator. Then replace all use
+    def replace_nodes_by_fused_op(self, nodes: Sequence[Value], root: Value):
+        nodes_set = OrderedSet(nodes)
+        assert all(node in self.nodes for node in nodes)
+        # construct subgraph, fused op and fused tensor from nodes
+        subgraph = build_graph_from_tensor(root, lambda x: x not in nodes_set)
+        fused_op = Fused(subgraph)
+        invars = list(subgraph.params)
+        fused_tensor = Tensor.make_from_op(fused_op, invars)
+        for inv in invars:
+            self.add_user(inv, fused_tensor)
+        # replace all nodes in the graph
+        self.replace_all_use_with(root, fused_tensor)
+        for node in nodes:
+            self.remove_node(node)
+        return fused_tensor
+
+    # print related
     def pp_graph(self):
         param_str = "params: "
         for param in self.params:
@@ -144,22 +194,29 @@ class Fused(Op):
 
     def compute(self, *args):
         # TODO(hongyi): replace it by a fused kernel
-        self.graph.exec(*args)
+        return self.graph.exec(*args)
 
 
-def build_graph_from_tensor(root: Tensor):
+def build_graph_from_tensor(root: Tensor, is_leaf_fn=None):
     queue = Queue()
     queue.put(root)
     visited = set()
     graph = Graph(root)
-    # although we can use topo_dfs here, we use bfs instead because topo_dfs
-    # cannot handle very large graph.
+    # handle custom is_leaf(for subgraph)
+    default_is_leaf = lambda x: x.cached_data is not None
+    if is_leaf_fn is None:
+        is_leaf = default_is_leaf
+    else:
+        assert isinstance(is_leaf_fn, Callable)
+        is_leaf = lambda x: is_leaf_fn(x) or default_is_leaf(x)
+    # although we can use topo_dfs, we pick bfs instead because topo_dfs cannot
+    # handle very deep graph.
     while not queue.empty():
         node = queue.get()
         if node.inputs is None:
             continue
         for input_tensor in node.inputs:
-            if input_tensor.cached_data is not None:
+            if is_leaf(input_tensor):
                 graph.add_param(input_tensor, node)
             elif input_tensor in visited:
                 continue
@@ -170,29 +227,20 @@ def build_graph_from_tensor(root: Tensor):
     return graph
 
 
-def build_graph_from_tensors(root: Sequence[Tensor]):
-    root = make_tuple(*root)
-    return build_graph_from_tensor(root)
-
-
-def replace_all_use_with(origin: Value, new: Value, graph: Graph):
-    assert origin in graph.users
-    for user in list(graph.users):
-        for idx in range(len(user.inputs)):
-            if user.inputs[idx] == origin:
-                user.inputs[idx] = new
-
-
 # A fused operator may have multiple outputs. We add a tuple operator and get
 # its elements as the original outputs
 def _add_tuple_and_get_elements(*args):
     t = make_tuple(*args)
-    return tuple(tuple_get_item(t, i) for i in range(len(args)))
+    return t, tuple(tuple_get_item(t, i) for i in range(len(args)))
 
 
-# Given a subgraph, replace it by a fused operator. Then replace all use
-def _replace_nodes_by_fused_op(subgraph, graph):
-    pass
+def _collect_multi_roots(nodes: Sequence[Value], graph: Graph):
+    assert len(nodes) > 1
+    root, new_nodes = _add_tuple_and_get_elements(nodes)
+    for outv, new_outv in zip(nodes, new_nodes):
+        graph.replace_all_use_with(outv, new_outv)
+        graph.remove_node(outv)
+    return root, new_nodes
 
 
 # version 1: An elementwise unary op after any op

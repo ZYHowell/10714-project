@@ -42,13 +42,14 @@ ndl.Tensor.__str__ = ndl.Value.__str__
 ndl.Tensor.__repr__ = ndl.Value.__repr__
 h: ndl.Tensor
 
-# check topo order
+print(graph)
+# Test replace by fused op:
+topo_order = graph.topo_order()
+graph.replace_nodes_by_fused_op(topo_order[-2:], topo_order[-1])
 print(graph)
 
 # check graph.exec's correctness
 assert all(node.cached_data is None for node in graph.nodes)
-exec_output = graph(*graph.params)
-# check nodes are realized
-assert all(node.cached_data is None for node in graph.nodes)
-# check value correctness
-assert exec_output == h.realize_cached_data()
+cor = model(ndl.Tensor(x, device=device),
+            ndl.Tensor(h0, device=device)).realize_cached_data()
+assert graph(*graph.params) == cor
