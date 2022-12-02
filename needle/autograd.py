@@ -80,6 +80,13 @@ class TensorTupleOp(Op):
         return TensorTuple.make_from_op(self, args)
 
 
+_uuid_cnt = 0
+def next_uuid():
+    global _uuid_cnt
+    _uuid_cnt += 1
+    return _uuid_cnt
+
+
 class Value:
     """A value in the computational graph."""
 
@@ -90,6 +97,7 @@ class Value:
     # dynamic computation
     cached_data: NDArray
     requires_grad: bool
+    uuid: int
 
     def realize_cached_data(self):
         """Run compute to realize the cached data"""
@@ -121,6 +129,7 @@ class Value:
     ):
         global TENSOR_COUNTER
         TENSOR_COUNTER += 1
+        self.uuid = next_uuid()
         if requires_grad is None:
             requires_grad = any(x.requires_grad for x in inputs)
         self.op = op
@@ -156,6 +165,12 @@ class Value:
         if array_api is numpy:
             return data
         return data.numpy() if not isinstance(data, tuple) else [x.numpy() for x in data]
+
+    def __str__(self):
+        return f"Value({self.uuid})"
+
+    def __repr__(self):
+        return self.__str__()
 
 
 ### Not needed in HW1

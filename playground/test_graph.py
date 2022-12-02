@@ -37,3 +37,20 @@ model.bias_hh = ndl.Tensor(model_.bias_hh.detach().numpy(), device=device)
 h = model(ndl.Tensor(x, device=device), ndl.Tensor(h0, device=device))
 
 graph = build_graph_from_tensor(h)
+
+ndl.Tensor.__str__ = ndl.Value.__str__
+ndl.Tensor.__repr__ = ndl.Value.__repr__
+h: ndl.Tensor
+
+# check topo order
+for node in graph.nodes:
+    print(node, node.inputs)
+print(graph.topo_order())
+
+# check graph.exec's correctness
+assert all(node.cached_data is None for node in graph.nodes)
+exec_output = graph.exec(*graph.params)
+# check nodes are realized
+assert all(node.cached_data is None for node in graph.nodes)
+# check value correctness
+assert exec_output == h.realize_cached_data()
