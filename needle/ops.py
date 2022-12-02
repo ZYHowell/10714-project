@@ -705,3 +705,68 @@ def mean(a, axes, keepdims=False):
         out = reshape(out, keepdim_shape(a.shape, axes))
     return out
 ###### End my ops
+
+_unary_elementwise_ops = set()
+
+
+_binary_elementwise_ops = set()
+
+
+_op_names = {}
+
+
+def register_op(cls, name):
+    _op_names[cls] = name
+
+
+def op_name(op):
+    cls = type(op)
+    if cls in _op_names:
+        return _op_names[cls]
+    return str(cls)[len("<class 'needle.ops."):-2]
+
+
+def register_ewise_unary(cls, name):
+    _unary_elementwise_ops.add(cls)
+    register_op(cls, name)
+
+
+def register_ewise_binary(cls, name):
+    _binary_elementwise_ops.add(cls)
+    register_op(cls, name)
+
+
+def is_ewise_unary(op):
+    return type(op) in _unary_elementwise_ops
+
+
+def is_ewise_binary(op):
+    return type(op) in _binary_elementwise_ops
+
+
+register_ewise_unary(AddScalar, "add_scalar")
+register_ewise_unary(MulScalar, "mul_scalar")
+register_ewise_unary(PowerScalar, "pow_scalar")
+register_ewise_unary(DivScalar, "div_scalar")
+register_ewise_unary(Negate, "neg")
+register_ewise_unary(Log, "log")
+register_ewise_unary(Exp, "exp")
+register_ewise_unary(ReLU, "relu")
+register_ewise_unary(Tanh, "tanh")
+
+register_ewise_binary(EWiseAdd, "add")
+register_ewise_binary(EWiseMul, "mul")
+register_ewise_binary(EWiseDiv, "div")
+
+register_op(Transpose, "transpose")
+register_op(Reshape, "reshape")
+register_op(BroadcastTo, "broadcast_to")
+register_op(Summation, "sum")
+register_op(MatMul, "dot")
+register_op(LogSumExp, "logsumexp")
+register_op(Stack, "stack")
+register_op(Split, "split")
+register_op(Flip, "flip")
+register_op(Dilate, "dilate")
+register_op(UnDilate, "undilate")
+register_op(Conv, "conv")

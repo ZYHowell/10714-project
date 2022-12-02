@@ -2,10 +2,11 @@ from queue import Queue
 from typing import Callable, Dict, Sequence
 
 from needle.autograd import Op, Tensor, Value
-from needle.ops import make_tuple, tuple_get_item
+from needle.ops import (make_tuple, tuple_get_item, op_name, register_op,
+                        is_ewise_binary, is_ewise_unary)
 from needle.utils import OrderedSet
 
-indent_len = 4
+indent_len = 2
 
 
 def get_indent():
@@ -152,26 +153,23 @@ class Graph:
 
     # print related
     def pp_graph(self):
-        param_str = "params: "
+        param_str = get_indent() + "params: "
         for param in self.params:
             param_str += param.name() + f" {pp_shape(param.cached_data)}" + ", "
         if len(self.params) > 0:
             param_str = param_str[:-1]
         param_dict = {p: idx for idx, p in enumerate(self.params)}
 
-        eqn_str = "eqns:"
+        eqn_str = get_indent() + "eqns:"
         for node in self.topo_order():
-            cur_eqn_str = f"\n{get_indent()}"
+            cur_eqn_str = f"\n{get_indent() * 2}"
             cur_eqn_str += node.name() + " = "
             if node in param_dict:
                 cur_eqn_str += f"Parameter({param_dict[node]})"
                 eqn_str += cur_eqn_str
                 continue
 
-            # The op name is just a hack.
-            op_name = str(type(node.op))
-            op_name = op_name[len("<class 'needle.ops."):-2]
-            cur_eqn_str += op_name + " ("
+            cur_eqn_str += op_name(node.op) + " ("
             for inv in node.inputs:
                 cur_eqn_str += inv.name() + ", "
             if len(node.inputs) > 0:
@@ -179,7 +177,7 @@ class Graph:
             cur_eqn_str += ")"
             eqn_str += cur_eqn_str
 
-        root_str = "root var: " + self.root.name()
+        root_str = get_indent() + "root var: " + self.root.name()
         ret_str = "{\n" + param_str + "\n" + eqn_str + "\n" + root_str + "\n}"
         return ret_str
 
@@ -195,6 +193,9 @@ class Fused(Op):
     def compute(self, *args):
         # TODO(hongyi): replace it by a fused kernel
         return self.graph.exec(*args)
+
+
+register_op(Fused, "fused")
 
 
 def build_graph_from_tensor(root: Tensor, is_leaf_fn=None):
@@ -244,8 +245,17 @@ def _collect_multi_roots(nodes: Sequence[Value], graph: Graph):
 
 
 # version 1: An elementwise unary op after any op
-def pattern_matching_single_unary(graph):
-    pass
+def pattern_matching_single_unary(graph: Graph):
+    fused = set()
+    for node in graph.topo_order():
+        if node in graph.params or node in fused:
+            continue
+        if is_ewise_unary(node.op):
+            src = node.inputs[0]
+            if src not in fused and len(graph.users[src]) == 1:
+                nodes = (src, node)
+                graph.replace_nodes_by_fused_op(nodes, node)
+                fused.update(nodes)
 
 
 # version 2: A series of elementwise unary ops after any op
