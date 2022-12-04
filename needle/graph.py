@@ -3,7 +3,7 @@ from typing import Callable, Dict, Sequence
 
 from needle.autograd import Op, Tensor, Value
 from needle.ops import (make_tuple, tuple_get_item, op_name, register_op,
-                        is_ewise_binary, is_ewise_unary)
+                        is_ewise_binary, is_ewise_unary, is_broadcast)
 from needle.utils import OrderedSet
 
 indent_len = 2
@@ -120,7 +120,7 @@ class Graph:
             for idx in range(len(user.inputs)):
                 if user.inputs[idx] == origin:
                     user.inputs[idx] = new
-        self.users[new] = self.users[origin]
+        self.users[new] = OrderedSet(self.users[origin])
         self.nodes.add(new)
         self.users[origin].clear()
         if self.root == origin:
@@ -131,7 +131,7 @@ class Graph:
         self.users.pop(node)
         self.nodes.remove(node)
         for invar in node.inputs:
-            if invar in self.nodes:
+            if invar in self.users:
                 self.users[invar].discard(node)
 
     # Given a subgraph, replace it by a fused operator. Then replace all use
@@ -236,7 +236,7 @@ def _add_tuple_and_get_elements(*args):
 
 
 def _collect_multi_roots(nodes: Sequence[Value], graph: Graph):
-    assert len(nodes) > 1
+    assert len(nodes) > 1, len(nodes)
     root, new_nodes = _add_tuple_and_get_elements(nodes)
     for outv, new_outv in zip(nodes, new_nodes):
         graph.replace_all_use_with(outv, new_outv)
@@ -258,11 +258,91 @@ def pattern_matching_single_unary(graph: Graph):
                 fused.update(nodes)
 
 
-# version 2: A series of elementwise unary ops after any op
-def pattern_matching_unarys(graph):
-    pass
+# TODO: to handle c = neg(a) + relu(a), we need to build a dep tree, and check
+# whether all ops between a node and its parent on the tree is unary or binary.
+def look_up_from(root: Value, graph: Graph):
+    visited = set()
+    fused = OrderedSet()
+    q = Queue()
+
+    q.put(root)
+    visited.add(root)
+    while not q.empty():
+        node = q.get()
+        for inv in node.inputs:
+            if inv in visited:
+                continue
+            if (len(graph.users[inv]) == 1 and
+                (is_ewise_unary(inv.op) or is_ewise_binary(inv.op) or
+                 is_broadcast(inv.op))):
+                fused.add(inv)
+                q.put(inv)
+            visited.add(inv)
+    return fused
+
+def look_down_from(root: Value, graph: Graph):
+    visited = set()
+    fused = OrderedSet()
+    final_root = OrderedSet()
+    q = Queue()
+
+    q.put(root)
+    fused.add(root)
+    visited.add(root)
+    final_root.add(root)
+    while not q.empty():
+        node = q.get()
+        if len(graph.users[node]) > 1:
+            # TODO(hongyi): this condition may be removed, but i don't think you
+            # can do so complicated optimization
+            pass
+        else:
+            added_users = []
+            for user in graph.users[node]:
+                if user in visited:
+                    continue
+                elif (is_ewise_unary(user.op) or is_ewise_binary(user.op) or
+                      is_broadcast(user.op)):
+                    fused.add(user)
+                    q.put(user)
+                    added_users.append(user)
+            if node in final_root and len(added_users) > 0:
+                final_root.remove(node)
+                final_root.update(added_users)
+        visited.add(node)
+    if len(final_root) == 1:
+        final_root = list(final_root)[0]
+    else:
+        final_root = _collect_multi_roots(tuple(final_root), graph)
+    return fused, final_root
 
 
-# version 3: Add elementwise binary ops as well
-def pattern_matching_elementwise(graph):
-    pass
+def up_down_look(node: Value, graph: Graph):
+    fused = OrderedSet()
+
+    # look up from node
+    fused.update(look_up_from(node, graph))
+
+    # look down
+    new_fused, root = look_down_from(node, graph)
+    fused.update(new_fused)
+
+    # look up from the new root: root = node + neg(param), we need to involve
+    # the neg operand into the fused graph
+    fused.update(look_up_from(root, graph))
+    return fused, root
+
+
+# version 2: All elementwise operators around an op
+def pattern_matching_elementwise(graph: Graph):
+    all_fused = set()
+    for node in graph.topo_order():
+        if node in graph.params or node in all_fused:
+            continue
+        if (is_ewise_unary(node.op) or is_ewise_binary(node.op) or
+                is_broadcast(node.op)):
+            continue
+        fused, root = up_down_look(node, graph)
+        if len(fused) > 1:
+            graph.replace_nodes_by_fused_op(list(fused), root)
+            all_fused.update(fused)

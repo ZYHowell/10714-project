@@ -80,14 +80,14 @@ class TensorOp(Op):
     """ Op class specialized to output tensors, will be alterate subclasses for other structures """
 
     def __call__(self, *args):
-        return Tensor.make_from_op(self, args)
+        return Tensor.make_from_op(self, list(args))
 
 
 class TensorTupleOp(Op):
     """Op class specialized to output TensorTuple"""
 
     def __call__(self, *args):
-        return TensorTuple.make_from_op(self, args)
+        return TensorTuple.make_from_op(self, list(args))
 
 
 _uuid_cnt = 0

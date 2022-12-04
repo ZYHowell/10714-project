@@ -743,6 +743,9 @@ def is_ewise_unary(op):
 def is_ewise_binary(op):
     return type(op) in _binary_elementwise_ops
 
+def is_broadcast(op):
+    return isinstance(op, BroadcastTo)
+
 
 register_ewise_unary(AddScalar, "add_scalar")
 register_ewise_unary(MulScalar, "mul_scalar")
