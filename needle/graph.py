@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, Sequence, Tuple, Union
 from needle.autograd import Op, Tensor, Value
 from needle.ops import (make_tuple, tuple_get_item, op_name, register_op,
                         is_ewise_binary, is_ewise_unary, is_broadcast,
-                        AbstractArray, infer_shape)
+                        AbstractArray, infer_shape, Matmul)
 from needle.utils import OrderedSet
 import torch
 
@@ -283,9 +283,31 @@ class Fused(Op):
         self.graph = graph
 
     def compute(self, *args):
-        # TODO(hongyi): replace it by a fused kernel
-        return self.graph.exec(*args)
+        topo_order = self.graph.topo_order()
+        ewise_op_names = []
+        is_scalar_op = []
+        val_map = {}
+        assert len(args) == len(self.graph.params)
 
+        def map_or_cached(val: Value):
+            if val in self.graph.params or val in self.graph.nodes:
+                return val_map[val]
+            return val.realize_cached_data()
+
+        for p, v in zip(self.graph.params, args):
+            val_map[p] = v        
+            
+        for i, t in enumerate(topo_order):
+            input = [map_or_cached(inv) for inv in t.inputs]
+            
+            if i ==0:
+                assert isinstance(t.op, Matmul)
+            else:
+                ewise_op_names.append(op_name(t.op))
+                is_scalar_op.append(is_ewise_unary(t.op))
+       
+
+        # return self.graph.exec(*args)
 
 register_op(Fused, "fused")
 

@@ -371,7 +371,8 @@ void Matmul(const AlignedArray& a, const AlignedArray& b, AlignedArray* out, uin
 
 inline void AlignedDot(const float* __restrict__ a, 
                        const float* __restrict__ b, 
-                       float* __restrict__ out) {
+                       float* __restrict__ out,
+                       std::vector<float(*)(float)> ewise) {
 
   /**
    * Multiply together two TILE x TILE matrices, and _add _the result to out (it is important to add
@@ -401,6 +402,47 @@ inline void AlignedDot(const float* __restrict__ a,
       for (size_t k = 0; k < TILE; ++k) {
         // result[i][u] += x[i][j] * y[j][u]
         out[i * TILE + k] += num * b[j * TILE + k];
+      }
+    }
+  }
+  // for(const auto& f: ewise){
+  //   out[i] = f(out[i]);
+  // }
+  /// END YOUR SOLUTION
+}
+
+void MatmulTiledWithFusedOps(const AlignedArray& a, const AlignedArray& b, AlignedArray* out, uint32_t m,
+                 uint32_t n, uint32_t p, std::vector<float(*)(float)> ewise) {
+  /**
+   * Matrix multiplication on tiled representations of array.  In this setting, a, b, and out
+   * are all *4D* compact arrays of the appropriate size, e.g. a is an array of size
+   *   a[m/TILE][n/TILE][TILE][TILE]
+   * You should do the multiplication tile-by-tile to improve performance of the array (i.e., this
+   * function should call `AlignedDot()` implemented above).
+   * 
+   * Note that this function will only be called when m, n, p are all multiples of TILE, so you can
+   * assume that this division happens without any remainder.
+   * 
+   * Args:
+   *   a: compact 4D array of size m/TILE x n/TILE x TILE x TILE
+   *   b: compact 4D array of size n/TILE x p/TILE x TILE x TILE
+   *   out: compact 4D array of size m/TILE x p/TILE x TILE x TILE to write to
+   *   m: rows of a / out
+   *   n: columns of a / rows of b
+   *   p: coolumns of b / out
+   * 
+   */
+  /// BEGIN YOUR SOLUTION
+  memset(out->ptr, 0, ELEM_SIZE * m * p);
+
+  const size_t sq_tile = TILE * TILE;
+  for (size_t i = 0; i < m / TILE; ++i) {
+    for (size_t j = 0; j < n / TILE; ++j) {
+      scalar_t* a_tile = a.ptr + i * n * TILE + j * sq_tile;
+      for (size_t k = 0; k < p / TILE; ++k) {
+        AlignedDot(a_tile,
+                   b.ptr + j * p * TILE + k * sq_tile,
+                    out->ptr + i * p * TILE + k * sq_tile, ewise);
       }
     }
   }
@@ -438,7 +480,7 @@ void MatmulTiled(const AlignedArray& a, const AlignedArray& b, AlignedArray* out
       for (size_t k = 0; k < p / TILE; ++k) {
         AlignedDot(a_tile,
                    b.ptr + j * p * TILE + k * sq_tile,
-                    out->ptr + i * p * TILE + k * sq_tile);
+                    out->ptr + i * p * TILE + k * sq_tile, {});
       }
     }
   }
@@ -486,6 +528,12 @@ void ReduceSum(const AlignedArray& a, AlignedArray* out, size_t reduce_size) {
   }
   /// END YOUR SOLUTION
 }
+
+
+void FusedOp(std::string anchor_op, std::vector<std::string> ewise_op){
+
+}
+
 
 }  // namespace cpu
 }  // namespace needle

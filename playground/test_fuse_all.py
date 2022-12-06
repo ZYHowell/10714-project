@@ -4,6 +4,8 @@ import needle as ndl
 from needle import nn, init
 from needle.graph import build_graph_from_tensor, pattern_matching_elementwise
 
+
+
 class Model(nn.Module):
     def __init__(self, input_size, hidden_size, device, dtype):
         kwargs = {
@@ -22,13 +24,12 @@ class Model(nn.Module):
         ret = self.act(-X @ self.W_ih + self.bias_ih) @ self.W_hh + self.bias_hh
         return self.act(ret)
 
-batch_size = 1
-input_size = 1
-hidden_size = 1
-device = ndl.cpu()
+batch_size = 2048
+input_size = 2048
+hidden_size = 2048
+device = ndl.cuda()
 dtype = "float32"
 ndl.autograd.LAZY_MODE = True
-
 x = np.random.randn(batch_size, input_size).astype(np.float32)
 
 model = Model(input_size, hidden_size, device=device, dtype=dtype)

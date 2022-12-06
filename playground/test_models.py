@@ -331,4 +331,4 @@ def test_language_model_implementation(seq_length, num_layers, batch_size,
 
 
 if __name__ == "__main__":
-    pytest.main()
+    test_language_model_implementation(13, 2, 15, 34, 12, True, 1000, 'rnn', ndl.cuda())
