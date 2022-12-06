@@ -3,10 +3,11 @@ from typing import Any, Callable, Dict, Sequence, Tuple, Union
 
 from needle.autograd import Op, Tensor, Value
 from needle.ops import (make_tuple, tuple_get_item, op_name, register_op,
-                        is_ewise_binary, is_ewise_unary, is_broadcast,
+                        is_ewise_binary, is_ewise_unary, is_broadcast, _should_broadcast_to,
                         AbstractArray, infer_shape, MatMul)
 from needle.utils import OrderedSet
 from needle.backend_ndarray import NDArray
+from needle.backend_selection import array_api
 import needle as ndl
 import torch
 
@@ -286,6 +287,7 @@ class Fused(Op):
         self.graph = graph
 
     def compute(self, *args):
+        import time
         freezed_graph = FreezedGraph(self.graph)
         freezed_topo_order = freezed_graph.topo_order()
         topo_order = self.graph.topo_order()
@@ -306,6 +308,7 @@ class Fused(Op):
         device = ndl.cuda()
         cnt = 0
         for (t, freeze_t) in zip(topo_order, freezed_topo_order):
+            time0 = time.time()
             if freeze_t.op is None:
                 continue
             if cnt ==0:
@@ -317,10 +320,18 @@ class Fused(Op):
                 out = NDArray.make((m, p), device=device)
             else:
                 if len(t.inputs) == 2:
-                    for inv in t.inputs:
-                        if map_or_cached(inv) is not None:
-                            tensor_input_topo_order.append(map_or_cached(inv).compact()._handle)
-                            scalar_input_topo_order.append(0.)
+                    additional_input= t.inputs[1].realize_cached_data()
+                    s1 = freeze_t.inputs[0].aval.shape
+                    s2 = freeze_t.inputs[1].aval.shape
+                    if _should_broadcast_to(s1, s2):
+                        raise ValueError("broadcasting to second input is not supported")
+                    elif _should_broadcast_to(s2, s1):
+                        print("do broadcast")
+                        if (len(s2) < len(s1)):
+                            additional_input = additional_input.reshape((1,) * (len(s1) - len(s2)) + s2)
+                        additional_input = array_api.broadcast_to(additional_input, s1).compact()
+                    tensor_input_topo_order.append(additional_input._handle)
+                    scalar_input_topo_order.append(0.)
                 elif len(t.inputs)==1:
                     dummy = NDArray.make((1,1), device=device)
                     tensor_input_topo_order.append(dummy._handle)
@@ -330,8 +341,14 @@ class Fused(Op):
                 ewise_op_names.append(op_name(t.op))
                 is_scalar_op.append(int(is_ewise_unary(t.op)))
             cnt+=1
-
+            time1 = time.time()
+            print("prepare time", time1-time0)
+        torch.cuda.synchronize()
+        tic = time.time()
         device.matmul_fused(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
+        torch.cuda.synchronize()
+        toc = time.time()
+        print("fused time", toc-tic)
         return out
         # return self.graph.exec(*args)
 
