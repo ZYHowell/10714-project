@@ -1,9 +1,10 @@
 from queue import Queue
-from typing import Callable, Dict, Sequence
+from typing import Any, Callable, Dict, Sequence, Tuple, Union
 
 from needle.autograd import Op, Tensor, Value
 from needle.ops import (make_tuple, tuple_get_item, op_name, register_op,
-                        is_ewise_binary, is_ewise_unary, is_broadcast)
+                        is_ewise_binary, is_ewise_unary, is_broadcast,
+                        AbstractArray, infer_shape)
 from needle.utils import OrderedSet
 import torch
 
@@ -161,10 +162,19 @@ class Graph:
         return fused_tensor
 
     # print related
+    def pp_param(self, param):
+        return param.name() + f" {pp_shape(param.cached_data)}"
+
+    def pp_outv(self, var):
+        return var.name()
+
+    def pp_inv(self, var):
+        return var.name()
+
     def pp_graph(self):
         param_str = get_indent() + "params: "
         for param in self.params:
-            param_str += param.name() + f" {pp_shape(param.cached_data)}" + ", "
+            param_str += self.pp_param(param) + ", "
         if len(self.params) > 0:
             param_str = param_str[:-1]
         param_dict = {p: idx for idx, p in enumerate(self.params)}
@@ -172,7 +182,7 @@ class Graph:
         eqn_str = get_indent() + "eqns:"
         for node in self.topo_order():
             cur_eqn_str = f"\n{get_indent() * 2}"
-            cur_eqn_str += node.name() + " = "
+            cur_eqn_str += self.pp_outv(node) + " = "
             if node in param_dict:
                 cur_eqn_str += f"Parameter({param_dict[node]})"
                 eqn_str += cur_eqn_str
@@ -180,7 +190,7 @@ class Graph:
 
             cur_eqn_str += op_name(node.op) + " ("
             for inv in node.inputs:
-                cur_eqn_str += inv.name() + ", "
+                cur_eqn_str += self.pp_inv(inv) + ", "
             if len(node.inputs) > 0:
                 cur_eqn_str = cur_eqn_str[:-2]
             cur_eqn_str += ")"
@@ -192,6 +202,79 @@ class Graph:
 
     def __str__(self):
         return self.pp_graph()
+
+
+class AbstractValue(Value):
+    aval: Union[AbstractArray, Tuple[AbstractArray]] = None
+
+    def __init__(self, val: Value, inputs, is_param):
+        if is_param:
+            self._init(None, [],
+                       num_outputs=val.num_outputs,
+                       cached_data=None,
+                       requires_grad=False)
+        else:
+            self._init(val.op,
+                       inputs,
+                       num_outputs=val.num_outputs,
+                       cached_data=None,
+                       requires_grad=False)
+
+    def realized_cached_data(self):
+        raise NotImplementedError()
+
+    def __str__(self):
+        type_name = "AbsValue"
+        return f"{type_name}({self.name()})"
+
+
+class FreezedGraph(Graph):
+    """A freezed graph which should behave as a closed function."""
+    def __init__(self, graph: Graph):
+        var_map: Dict[Value, AbstractValue] = {}
+
+        def map_or_create(val):
+            if val in var_map:
+                return var_map[val]
+            is_param = val in graph.params
+            inputs = ([] if is_param else
+                      [map_or_create(inv) for inv in val.inputs])
+            var_map[val] = AbstractValue(val, inputs, is_param)
+            return var_map[val]
+
+        self.params = tuple([map_or_create(var) for var in graph.params])
+        self.nodes = tuple([map_or_create(var) for var in graph.nodes])
+        self.root = map_or_create(graph.root)
+        self.users = {}
+        for var in graph.users:
+            self.users[var_map[var]] = set(
+                [var_map[u] for u in list(graph.users[var])])
+        self._topo_order = super().topo_order()
+
+        # Infer the shape and dtype of each node in the graph
+        for node in graph.topo_order():
+            mapped = var_map[node]
+            assert mapped.aval is None
+            if node in graph.params:
+                mapped.aval = AbstractArray(node.cached_data.shape,
+                                            node.cached_data.dtype)
+            else:
+                mapped.aval = infer_shape(mapped.op, *mapped.inputs)
+
+    def topo_order(self):
+        return self._topo_order
+
+    def _pp_var_with_shape(self, var):
+        return var.name() + f" {pp_shape(var.aval)}"
+
+    def pp_param(self, param):
+        return self._pp_var_with_shape(param)
+
+    def pp_outv(self, var):
+        return self._pp_var_with_shape(var)
+
+    def pp_inv(self, var):
+        return self._pp_var_with_shape(var)
 
 
 class Fused(Op):

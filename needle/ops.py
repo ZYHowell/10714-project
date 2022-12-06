@@ -1,12 +1,13 @@
 """Operatpr table."""
 # Global operator table.
-from numbers import Number
-from typing import Optional, List
-from .autograd import NDArray
-from .autograd import Op, Tensor, Value, TensorOp
-from .autograd import TensorTuple, TensorTupleOp
-from . import init
+from dataclasses import dataclass
+from typing import Any, Callable, Optional, Sequence
+
 import numpy
+
+from needle import init
+from needle.autograd import (Op, Tensor, Value, TensorOp, TensorTuple,
+                             TensorTupleOp)
 
 from .backend_selection import array_api, NDArray
 
@@ -706,6 +707,7 @@ def mean(a, axes, keepdims=False):
     return out
 ###### End my ops
 
+###### Operator rules
 _unary_elementwise_ops = set()
 
 
@@ -773,3 +775,55 @@ register_op(Flip, "flip")
 register_op(Dilate, "dilate")
 register_op(UnDilate, "undilate")
 register_op(Conv, "conv")
+
+
+##### Shape related operations
+@dataclass
+class AbstractArray:
+    shape: Sequence[int]
+    dtype: Any
+
+
+_shape_transition = {}
+
+
+def register_shape_transition(op_type, trans):
+    assert isinstance(trans, Callable)
+    _shape_transition[op_type] = trans
+
+
+def matmul_transition(*args):
+    assert len(args) == 2
+    aval_0 = args[0].aval
+    aval_1 = args[1].aval
+    assert aval_0.dtype == aval_1.dtype
+    s0 = aval_0.shape
+    s1 = aval_1.shape
+    maybe_s0 = s1[:-2] + s0[-2:]
+    maybe_s1 = s0[:-2] + s1[-2:]
+    # TODO(hongyi): add more return value if there is a broadcast
+    if _should_broadcast_to(s0, maybe_s0):
+        return AbstractArray(maybe_s0[-1:] + s1[-1:], aval_0.dtype)
+    if _should_broadcast_to(s1, maybe_s1):
+        return AbstractArray(s0[-1:] + s1[:-1], aval_0.dtype)
+    return AbstractArray(s0[-1:] + s1[:-1], aval_0.dtype)
+
+
+register_shape_transition(MatMul, matmul_transition)
+
+
+def infer_shape(op: Op, *args):
+    if is_ewise_unary(op):
+        return args[0].aval
+    if is_ewise_binary(op):
+        aval_0 = args[0].aval
+        aval_1 = args[1].aval
+        assert aval_0.dtype == aval_1.dtype
+        # TODO(hongyi): add more return value if there is a broadcast
+        if _should_broadcast_to(aval_0.shape, aval_1.shape):
+            return aval_1
+        elif _should_broadcast_to(aval_1.shape, aval_0.shape):
+            return aval_0
+        return aval_0
+    else:
+        return _shape_transition[type(op)](*args)
