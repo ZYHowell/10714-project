@@ -306,26 +306,33 @@ class Fused(Op):
         device = ndl.cuda()
         cnt = 0
         for (t, freeze_t) in zip(topo_order, freezed_topo_order):
-            if t.op is None:
+            if freeze_t.op is None:
                 continue
             if cnt ==0:
-                print(t.op)
-                assert isinstance(t.op, MatMul)
+                assert isinstance(freeze_t.op, MatMul)
                 m,n = freeze_t.inputs[0].aval.shape
                 _, p = freeze_t.inputs[1].aval.shape
                 matmul_a = map_or_cached(t.inputs[0])
                 matmul_b = map_or_cached(t.inputs[1])
                 out = NDArray.make((m, p), device=device)
             else:
-                for inv in t.inputs:
-                    if map_or_cached(inv) is not None:
-                        tensor_input_topo_order.append(map_or_cached(inv))
-                        scalar_input_topo_order.append(0.)
+                if len(t.inputs) == 2:
+                    for inv in t.inputs:
+                        if map_or_cached(inv) is not None:
+                            tensor_input_topo_order.append(map_or_cached(inv).compact()._handle)
+                            scalar_input_topo_order.append(0.)
+                elif len(t.inputs)==1:
+                    dummy = NDArray.make((1,1), device=device)
+                    tensor_input_topo_order.append(dummy._handle)
+                    scalar_input_topo_order.append(0.)
+                else:
+                    raise ValueError("ewise func with 2 or more inputs is not supported")
                 ewise_op_names.append(op_name(t.op))
-                is_scalar_op.append(is_ewise_unary(t.op))
+                is_scalar_op.append(int(is_ewise_unary(t.op)))
             cnt+=1
 
         device.matmul_fused(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
+        return out
         # return self.graph.exec(*args)
 
 register_op(Fused, "fused")

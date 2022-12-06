@@ -498,14 +498,23 @@ void EwiseTanh(const CudaArray &a, CudaArray *out) {
 
 using func_t = scalar_t (*)(scalar_t, scalar_t);
 __device__ scalar_t Add(scalar_t x, scalar_t y) { return x + y; }
+__device__ func_t p_Add = Add;
 __device__ scalar_t Mul(scalar_t x, scalar_t y) { return x * y; }
+__device__ func_t p_Mul = Mul;
 __device__ scalar_t Div(scalar_t x, scalar_t y) { return x / y; }
+__device__ func_t p_Div = Div;
 __device__ scalar_t Power(scalar_t x, scalar_t y) { return pow(x, y); }
+__device__ func_t p_Power = Power;
 __device__ scalar_t Negate(scalar_t x, scalar_t y) { return -x; }
+__device__ func_t p_Negate = Negate;
 __device__ scalar_t Tanh(scalar_t x, scalar_t y) { return tanh(x); }
+__device__ func_t p_Tanh = Tanh;
 __device__ scalar_t Exp(scalar_t x, scalar_t y) { return exp(x); }
+__device__ func_t p_Exp = Exp;
 __device__ scalar_t ReLU(scalar_t x, scalar_t y) { return x > 0 ? x : 0; }
+__device__ func_t p_ReLU = ReLU;
 __device__ scalar_t Log(scalar_t x, scalar_t y) { return log(x); }
+__device__ func_t p_Log = Log;
 __global__ void MatmulKernelFused(scalar_t **tensor_input,
                                   scalar_t *scalar_input, scalar_t *out,
                                   int32_t M, int32_t N, int32_t P,
@@ -590,18 +599,32 @@ void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
   dim3 blockDim(16, 16, 1);
   // handle fused ewise
   int ewise_ops_num = ewise_ops.size();
+
+
+  func_t h_Add, h_Mul, h_Div, h_Power, h_Negate, h_Tanh, h_Exp, h_ReLU, h_Log;
+  cudaMemcpyFromSymbol(&h_Add, p_Add, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Mul, p_Mul, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Div, p_Div, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Power, p_Power, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Negate, p_Negate, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Tanh, p_Tanh, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Exp, p_Exp, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_ReLU, p_ReLU, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Log, p_Log, sizeof(func_t));
+
   const std::unordered_map<std::string, func_t> ewise_func_map = {
-      {"EwiseAdd", Add},      {"EwiseMul", Mul},  {"EwiseDiv", Div},
-      {"AddScalar", Add},     {"MulScalar", Mul}, {"DivScalar", Div},
-      {"PowerScalar", Power}, {"Negate", Negate}, {"Tanh", Tanh},
-      {"Exp", Exp},           {"ReLU", ReLU},     {"Log", Log}};
+      {"add", h_Add}, {"mul", h_Mul}, {"div", h_Div}, {"add_scalar", h_Add}, {"mul_scalar", h_Mul}, {"div_scalar", h_Div}, {"power_scalar", h_Power}, {"neg", h_Negate}, {"tah", h_Tanh}, {"exp", h_Exp}, {"relu", h_ReLU}, {"log", h_Log}};
   std::vector<func_t> ewise_ops_func;
   for (const auto &op : ewise_ops) {
     ewise_ops_func.push_back(ewise_func_map.at(op));
   }
 
   scalar_t** tensor_input_cuda;
+  int* is_scalar_op_cuda;
+  func_t* ewise_ops_cuda;
   cudaMalloc(&tensor_input_cuda, (ewise_ops_num + 2) * sizeof(scalar_t*));
+  cudaMalloc(&is_scalar_op_cuda, (ewise_ops_num ) * sizeof(int));
+  cudaMalloc(&ewise_ops_cuda, (ewise_ops_num ) * sizeof(func_t));
   CudaArray scalar_input_cuda(ewise_ops_num + 2);
   scalar_t **host_tensor_input_ptr = (scalar_t **)std::malloc((ewise_ops_num+2) * sizeof(scalar_t *));
   scalar_t *host_scalar_input_ptr = (scalar_t *)std::malloc((ewise_ops_num+2) * sizeof(scalar_t));
@@ -615,14 +638,26 @@ void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
     }
   }
   cudaError_t err =
-      cudaMemcpy(host_scalar_input_ptr, scalar_input_cuda.ptr, (ewise_ops_num + 2) * sizeof(scalar_t), cudaMemcpyDeviceToHost);
+      cudaMemcpy(scalar_input_cuda.ptr, host_scalar_input_ptr, (ewise_ops_num + 2) * sizeof(scalar_t), cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(err));
   err =
-      cudaMemcpy(host_tensor_input_ptr, tensor_input_cuda, (ewise_ops_num + 2) * sizeof(scalar_t*), cudaMemcpyDeviceToHost);
+      cudaMemcpy(tensor_input_cuda, host_tensor_input_ptr, (ewise_ops_num + 2) * sizeof(scalar_t *), cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(err));
-  MatmulKernelFused<<<gridDim, blockDim>>>(tensor_input_cuda, scalar_input_cuda.ptr, out->ptr, M, N, P, ewise_ops_func.data(), ewise_ops_num, is_scalar_op.data());
+  err = cudaMemcpy(is_scalar_op_cuda, is_scalar_op.data(), ewise_ops_num * sizeof(int), cudaMemcpyHostToDevice);
+  if (err != cudaSuccess)
+    throw std::runtime_error(cudaGetErrorString(err));
+  err = cudaMemcpy(ewise_ops_cuda, ewise_ops_func.data(), ewise_ops_num * sizeof(func_t), cudaMemcpyHostToDevice);
+  if (err != cudaSuccess)
+    throw std::runtime_error(cudaGetErrorString(err));
+
+  MatmulKernelFused<<<gridDim, blockDim>>>(tensor_input_cuda, scalar_input_cuda.ptr, out->ptr, M, N, P, ewise_ops_cuda, ewise_ops_num, is_scalar_op_cuda);
+
+  cudaFree(tensor_input_cuda);
+  cudaFree(is_scalar_op_cuda);
+  cudaFree(ewise_ops_cuda);
+
   /// END YOUR SOLUTION
 }
 
