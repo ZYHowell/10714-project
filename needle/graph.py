@@ -5,6 +5,7 @@ from needle.autograd import Op, Tensor, Value
 from needle.ops import (make_tuple, tuple_get_item, op_name, register_op,
                         is_ewise_binary, is_ewise_unary, is_broadcast)
 from needle.utils import OrderedSet
+import torch
 
 indent_len = 2
 
@@ -101,9 +102,17 @@ class Graph:
             val_map[p] = v
 
         topo_order = self.topo_order()
+        torch.cuda.synchronize()
         for t in topo_order:
             if t not in val_map:
-                val_map[t] = t.op.compute(*[map_or_cached(i) for i in t.inputs])
+                input = [map_or_cached(i) for i in t.inputs]
+                import time
+                tic = time.perf_counter()
+                tmp =  t.op.compute(*input)
+                torch.cuda.synchronize()
+                toc = time.perf_counter()
+                print(f"compute {t.op} takes {toc - tic:.4f} seconds")
+                val_map[t] = tmp
         return val_map[self.root]
 
     def __call__(self, *args):

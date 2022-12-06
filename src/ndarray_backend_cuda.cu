@@ -220,7 +220,6 @@ void ScalarSetitem(size_t size, scalar_t val, CudaArray* out, std::vector<int32_
   CudaDims dim = CudaOneDim(size);
   ScalarSetKernel<<<dim.grid, dim.block>>>(val, out->ptr, size, VecToCuda(shape),
                                            VecToCuda(strides), offset);
-  cudaDeviceSynchronize();
   /// END YOUR SOLUTION
 }
 
@@ -239,7 +238,6 @@ void EwiseAdd(const CudaArray& a, const CudaArray& b, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseAddKernel<<<dim.grid, dim.block>>>(a.ptr, b.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 
 __global__ void ScalarAddKernel(const scalar_t* a, scalar_t val, scalar_t* out, size_t size) {
@@ -253,7 +251,6 @@ void ScalarAdd(const CudaArray& a, scalar_t val, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   ScalarAddKernel<<<dim.grid, dim.block>>>(a.ptr, val, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 
 /**
@@ -289,7 +286,6 @@ void EwiseMul(const CudaArray& a, const CudaArray& b, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseMulKernel<<<dim.grid, dim.block>>>(a.ptr, b.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 
 __global__ void ScalarMulKernel(const scalar_t* a, scalar_t val, scalar_t* out, size_t size) {
@@ -303,7 +299,6 @@ void ScalarMul(const CudaArray& a, scalar_t val, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   ScalarMulKernel<<<dim.grid, dim.block>>>(a.ptr, val, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Div
 __global__ void EwiseDivKernel(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t size) {
@@ -317,7 +312,6 @@ void EwiseDiv(const CudaArray& a, const CudaArray& b, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseDivKernel<<<dim.grid, dim.block>>>(a.ptr, b.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 
 __global__ void ScalarDivKernel(const scalar_t* a, scalar_t val, scalar_t* out, size_t size) {
@@ -331,7 +325,6 @@ void ScalarDiv(const CudaArray& a, scalar_t val, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   ScalarDivKernel<<<dim.grid, dim.block>>>(a.ptr, val, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Pow
 __global__ void ScalarPowKernel(const scalar_t* a, scalar_t val, scalar_t* out, size_t size) {
@@ -345,7 +338,6 @@ void ScalarPower(const CudaArray& a, scalar_t val, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   ScalarPowKernel<<<dim.grid, dim.block>>>(a.ptr, val, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Max
 __global__ void EwiseMaximumKernel(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t size) {
@@ -359,7 +351,6 @@ void EwiseMaximum(const CudaArray& a, const CudaArray& b, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseMaximumKernel<<<dim.grid, dim.block>>>(a.ptr, b.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 
 __global__ void ScalarMaximumKernel(const scalar_t* a, scalar_t val, scalar_t* out, size_t size) {
@@ -373,7 +364,6 @@ void ScalarMaximum(const CudaArray& a, scalar_t val, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   ScalarMaximumKernel<<<dim.grid, dim.block>>>(a.ptr, val, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Eq
 __global__ void EwiseEqKernel(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t size) {
@@ -387,7 +377,6 @@ void EwiseEq(const CudaArray& a, const CudaArray& b, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseEqKernel<<<dim.grid, dim.block>>>(a.ptr, b.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 
 __global__ void ScalarEqKernel(const scalar_t* a, scalar_t val, scalar_t* out, size_t size) {
@@ -401,7 +390,6 @@ void ScalarEq(const CudaArray& a, scalar_t val, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   ScalarEqKernel<<<dim.grid, dim.block>>>(a.ptr, val, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Ge
 __global__ void EwiseGeKernel(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t size) {
@@ -415,7 +403,6 @@ void EwiseGe(const CudaArray& a, const CudaArray& b, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseGeKernel<<<dim.grid, dim.block>>>(a.ptr, b.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 
 __global__ void ScalarGeKernel(const scalar_t* a, scalar_t val, scalar_t* out, size_t size) {
@@ -429,7 +416,6 @@ void ScalarGe(const CudaArray& a, scalar_t val, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   ScalarGeKernel<<<dim.grid, dim.block>>>(a.ptr, val, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Log
 __global__ void EwiseLogKernel(const scalar_t* a, scalar_t* out, size_t size) {
@@ -443,7 +429,6 @@ void EwiseLog(const CudaArray& a, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseLogKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Exp
 __global__ void EwiseExpKernel(const scalar_t* a, scalar_t* out, size_t size) {
@@ -457,7 +442,6 @@ void EwiseExp(const CudaArray& a, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseExpKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 // Tanh
 __global__ void EwiseTanhKernel(const scalar_t* a, scalar_t* out, size_t size) {
@@ -471,7 +455,6 @@ void EwiseTanh(const CudaArray& a, CudaArray* out) {
    */
   CudaDims dim = CudaOneDim(out->size);
   EwiseTanhKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, out->size);
-  cudaDeviceSynchronize();
 }
 /// END YOUR SOLUTION
 
@@ -551,7 +534,6 @@ void Matmul(const CudaArray& a, const CudaArray& b, CudaArray* out, uint32_t M, 
   dim3 grid_dim = dim3((P + BN - 1) / BN, (M + BM - 1) / BM, 1);
   dim3 block_dim = dim3(BM, BN, 1);
   MatmulKernel<<<grid_dim, block_dim>>>(a.ptr, b.ptr, out->ptr, M, P, N);
-  cudaDeviceSynchronize();
   /// END YOUR SOLUTION
 }
 
@@ -585,8 +567,6 @@ void ReduceMax(const CudaArray& a, CudaArray* out, size_t reduce_size) {
   /// BEGIN YOUR SOLUTION
   CudaDims dim = CudaOneDim(out->size);
   ReduceMaxKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, reduce_size, out->size);
-  cudaDeviceSynchronize();
-
   /// END YOUR SOLUTION
 }
 
@@ -616,8 +596,6 @@ void ReduceSum(const CudaArray& a, CudaArray* out, size_t reduce_size) {
   /// BEGIN YOUR SOLUTION
   CudaDims dim = CudaOneDim(out->size);
   ReduceSumKernel<<<dim.grid, dim.block>>>(a.ptr, out->ptr, reduce_size, out->size);
-  cudaDeviceSynchronize();
-
   /// END YOUR SOLUTION
 }
 
