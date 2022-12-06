@@ -4,8 +4,10 @@ from typing import Any, Callable, Dict, Sequence, Tuple, Union
 from needle.autograd import Op, Tensor, Value
 from needle.ops import (make_tuple, tuple_get_item, op_name, register_op,
                         is_ewise_binary, is_ewise_unary, is_broadcast,
-                        AbstractArray, infer_shape, Matmul)
+                        AbstractArray, infer_shape, MatMul)
 from needle.utils import OrderedSet
+from needle.backend_ndarray import NDArray
+import needle as ndl
 import torch
 
 indent_len = 2
@@ -113,6 +115,7 @@ class Graph:
                 torch.cuda.synchronize()
                 toc = time.perf_counter()
                 print(f"compute {t.op} takes {toc - tic:.4f} seconds")
+                t.cached_data = tmp
                 val_map[t] = tmp
         return val_map[self.root]
 
@@ -283,30 +286,46 @@ class Fused(Op):
         self.graph = graph
 
     def compute(self, *args):
+        freezed_graph = FreezedGraph(self.graph)
+        freezed_topo_order = freezed_graph.topo_order()
         topo_order = self.graph.topo_order()
         ewise_op_names = []
         is_scalar_op = []
+        tensor_input_topo_order = []
+        scalar_input_topo_order = []
         val_map = {}
         assert len(args) == len(self.graph.params)
 
         def map_or_cached(val: Value):
-            if val in self.graph.params or val in self.graph.nodes:
+            if val in self.graph.params:
                 return val_map[val]
-            return val.realize_cached_data()
+            return None
 
         for p, v in zip(self.graph.params, args):
             val_map[p] = v        
-            
-        for i, t in enumerate(topo_order):
-            input = [map_or_cached(inv) for inv in t.inputs]
-            
-            if i ==0:
-                assert isinstance(t.op, Matmul)
+        device = ndl.cuda()
+        cnt = 0
+        for (t, freeze_t) in zip(topo_order, freezed_topo_order):
+            if t.op is None:
+                continue
+            if cnt ==0:
+                print(t.op)
+                assert isinstance(t.op, MatMul)
+                m,n = freeze_t.inputs[0].aval.shape
+                _, p = freeze_t.inputs[1].aval.shape
+                matmul_a = map_or_cached(t.inputs[0])
+                matmul_b = map_or_cached(t.inputs[1])
+                out = NDArray.make((m, p), device=device)
             else:
+                for inv in t.inputs:
+                    if map_or_cached(inv) is not None:
+                        tensor_input_topo_order.append(map_or_cached(inv))
+                        scalar_input_topo_order.append(0.)
                 ewise_op_names.append(op_name(t.op))
                 is_scalar_op.append(is_ewise_unary(t.op))
-       
+            cnt+=1
 
+        device.matmul_fused(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
         # return self.graph.exec(*args)
 
 register_op(Fused, "fused")
@@ -435,7 +454,7 @@ def up_down_look(node: Value, graph: Graph):
     fused = OrderedSet()
 
     # look up from node
-    fused.update(look_up_from(node, graph))
+    # fused.update(look_up_from(node, graph))
 
     # look down
     new_fused, root = look_down_from(node, graph)

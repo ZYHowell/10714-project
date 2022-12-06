@@ -15,7 +15,6 @@ namespace cuda {
 typedef float scalar_t;
 const size_t ELEM_SIZE = sizeof(scalar_t);
 typedef ssize_t ptrdiff_t;
-
 struct CudaArray {
   CudaArray(const size_t size) {
     cudaError_t err = cudaMalloc(&ptr, size * ELEM_SIZE);
@@ -507,11 +506,11 @@ __device__ scalar_t Tanh(scalar_t x, scalar_t y) { return tanh(x); }
 __device__ scalar_t Exp(scalar_t x, scalar_t y) { return exp(x); }
 __device__ scalar_t ReLU(scalar_t x, scalar_t y) { return x > 0 ? x : 0; }
 __device__ scalar_t Log(scalar_t x, scalar_t y) { return log(x); }
-__device__ void MatmulKernelFused(const scalar_t **tensor_input,
-                                  const scalar_t *scalar_input, scalar_t *out,
+__global__ void MatmulKernelFused(scalar_t **tensor_input,
+                                  scalar_t *scalar_input, scalar_t *out,
                                   int32_t M, int32_t N, int32_t P,
                                   func_t *ewise_ops, int ewise_ops_num,
-                                  bool *is_scalar_op) {
+                                  int *is_scalar_op) {
   const int S = 32, L = 32, V = 2;
   __shared__ float sA[S][L], sB[S][L];
   float C[V][V]{0};
@@ -581,35 +580,10 @@ __device__ void MatmulKernelFused(const scalar_t **tensor_input,
 }
 void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
                  int32_t M, int32_t N, int32_t P,
-                 std::vector<std::string> > ewise_ops,
+                 std::vector<std::string> ewise_ops,
                  std::vector<CudaArray> ewise_tensor_input,
                  std::vector<scalar_t> ewise_scalar_input,
-                 std::vector<bool> is_scalar_op) {
-  /**
-   * Multiply two (compact) matrices into an output (also comapct) matrix.  You
-   * will want to look at the lecture and notes on GPU-based linear algebra to
-   * see how to do this.  Since ultimately mugrade is just evaluating
-   * correctness, you _can_ implement a version that simply parallelizes over
-   * (i,j) entries in the output array.  However, to really get the full benefit
-   * of this problem, we would encourage you to use cooperative fetching, shared
-   * memory register tiling, and other ideas covered in the class notes.  Note
-   * that unlike the tiled matmul function in the CPU backend, here you should
-   * implement a single function that works across all size matrices, whether or
-   * not they are a multiple of a tile size.  As with previous CUDA
-   * implementations, this function here will largely just set up the kernel
-   * call, and you should implement the logic in a separate MatmulKernel() call.
-   *
-   *
-   * Args:
-   *   a: compact 2D array of size m x n
-   *   b: comapct 2D array of size n x p
-   *   out: compact 2D array of size m x p to write the output to
-   *   M: rows of a / out
-   *   N: columns of a / rows of b
-   *   P: columns of b / out
-   */
-
-  /// BEGIN YOUR SOLUTION
+                 std::vector<int> is_scalar_op) {
   size_t grid_x = (M + 32 - 1) / 32;
   size_t grid_y = (N + 32 - 1) / 32;
   dim3 gridDim(grid_x, grid_y, 1);
@@ -625,9 +599,30 @@ void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
   for (const auto &op : ewise_ops) {
     ewise_ops_func.push_back(ewise_func_map.at(op));
   }
-  
-  MatmulKernel<<<gridDim, blockDim>>>(a.ptr, b.ptr, out->ptr, M, N, P);
 
+  scalar_t** tensor_input_cuda;
+  cudaMalloc(&tensor_input_cuda, (ewise_ops_num + 2) * sizeof(scalar_t*));
+  CudaArray scalar_input_cuda(ewise_ops_num + 2);
+  scalar_t **host_tensor_input_ptr = (scalar_t **)std::malloc((ewise_ops_num+2) * sizeof(scalar_t *));
+  scalar_t *host_scalar_input_ptr = (scalar_t *)std::malloc((ewise_ops_num+2) * sizeof(scalar_t));
+  host_tensor_input_ptr[0] = a.ptr;
+  host_tensor_input_ptr[1] = b.ptr;
+  for (int i = 0; i < ewise_ops_num; i++) {
+    if (is_scalar_op[i]) {
+      host_scalar_input_ptr[i + 2] = ewise_scalar_input[i];
+    } else {
+      host_tensor_input_ptr[i + 2] = ewise_tensor_input[i].ptr;
+    }
+  }
+  cudaError_t err =
+      cudaMemcpy(host_scalar_input_ptr, scalar_input_cuda.ptr, (ewise_ops_num + 2) * sizeof(scalar_t), cudaMemcpyDeviceToHost);
+  if (err != cudaSuccess)
+    throw std::runtime_error(cudaGetErrorString(err));
+  err =
+      cudaMemcpy(host_tensor_input_ptr, tensor_input_cuda, (ewise_ops_num + 2) * sizeof(scalar_t*), cudaMemcpyDeviceToHost);
+  if (err != cudaSuccess)
+    throw std::runtime_error(cudaGetErrorString(err));
+  MatmulKernelFused<<<gridDim, blockDim>>>(tensor_input_cuda, scalar_input_cuda.ptr, out->ptr, M, N, P, ewise_ops_func.data(), ewise_ops_num, is_scalar_op.data());
   /// END YOUR SOLUTION
 }
 
@@ -857,7 +852,7 @@ PYBIND11_MODULE(ndarray_backend_cuda, m) {
   m.def("ewise_tanh", EwiseTanh);
 
   m.def("matmul", Matmul);
-
+  m.def("matmul_fused", MatmulFused);
   m.def("reduce_max", ReduceMax);
   m.def("reduce_sum", ReduceSum);
 }
