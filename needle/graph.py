@@ -106,16 +106,10 @@ class Graph:
             val_map[p] = v
 
         topo_order = self.topo_order()
-        torch.cuda.synchronize()
         for t in topo_order:
             if t not in val_map:
                 input = [map_or_cached(i) for i in t.inputs]
-                import time
-                tic = time.perf_counter()
                 tmp =  t.op.compute(*input)
-                torch.cuda.synchronize()
-                toc = time.perf_counter()
-                # print(f"compute {t.op} takes {toc - tic:.4f} seconds")
                 t.cached_data = tmp
                 val_map[t] = tmp
         return val_map[self.root]
@@ -285,19 +279,19 @@ class Fused(Op):
 
     def __init__(self, graph: Graph):
         self.graph = graph
-
+        self.freezed_topo_order = None
+        
     def compute(self, *args):
         import time
-        freezed_graph = FreezedGraph(self.graph)
-        freezed_topo_order = freezed_graph.topo_order()
-        topo_order = self.graph.topo_order()
+        if not isinstance(self.graph, FreezedGraph):
+            self.graph = FreezedGraph(self.graph)
+            self.freezed_topo_order = self.graph.topo_order()
         ewise_op_names = []
         is_scalar_op = []
         tensor_input_topo_order = []
         scalar_input_topo_order = []
         val_map = {}
         assert len(args) == len(self.graph.params)
-
         def map_or_cached(val: Value):
             if val in self.graph.params:
                 return val_map[val]
@@ -307,19 +301,19 @@ class Fused(Op):
             val_map[p] = v        
         device = ndl.cuda()
         cnt = 0
-        for (t, freeze_t) in zip(topo_order, freezed_topo_order):
+        for  freeze_t in self.freezed_topo_order:
             if freeze_t.op is None:
                 continue
             if cnt ==0:
                 assert isinstance(freeze_t.op, MatMul)
                 m,n = freeze_t.inputs[0].aval.shape
                 _, p = freeze_t.inputs[1].aval.shape
-                matmul_a = map_or_cached(t.inputs[0])
-                matmul_b = map_or_cached(t.inputs[1])
+                matmul_a = map_or_cached(freeze_t.inputs[0])
+                matmul_b = map_or_cached(freeze_t.inputs[1])
                 out = NDArray.make((m, p), device=device)
             else:
-                if len(t.inputs) == 2:
-                    additional_input= t.inputs[1].realize_cached_data()
+                if len(freeze_t.inputs) == 2:
+                    additional_input= map_or_cached(freeze_t.inputs[1])
                     s1 = freeze_t.inputs[0].aval.shape
                     s2 = freeze_t.inputs[1].aval.shape
                     if _should_broadcast_to(s1, s2):
@@ -330,23 +324,21 @@ class Fused(Op):
                         additional_input = array_api.broadcast_to(additional_input, s1).compact()
                     tensor_input_topo_order.append(additional_input._handle)
                     scalar_input_topo_order.append(0.)
-                elif len(t.inputs)==1:
+                elif len(freeze_t.inputs)==1:
                     dummy = NDArray.make((1,1), device=device)
                     tensor_input_topo_order.append(dummy._handle)
                     scalar_input_topo_order.append(0.)
                 else:
                     raise ValueError("ewise func with 2 or more inputs is not supported")
-                ewise_op_names.append(op_name(t.op))
-                is_scalar_op.append(int(is_ewise_unary(t.op)))
+                ewise_op_names.append(op_name(freeze_t.op))
+                is_scalar_op.append(int(is_ewise_unary(freeze_t.op)))
             cnt+=1
-        torch.cuda.synchronize()
         if ewise_op_names == ["add", "relu"]:
             device.matmul_fused_bias_relu(matmul_a.compact()._handle, matmul_b.compact()._handle, tensor_input_topo_order[0], out._handle, m, n, p)
             # device.matmul_fused(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
             # device.matmul_fused_two_ewise(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
         elif ewise_op_names == ["add", "add", "tanh"]:
             device.matmul_fused_bias_bias_tanh(matmul_a.compact()._handle, matmul_b.compact()._handle, tensor_input_topo_order[0], tensor_input_topo_order[1], out._handle, m, n, p)
-        torch.cuda.synchronize()
         return out
         # return self.graph.exec(*args)
 
@@ -358,7 +350,7 @@ def build_graph_from_tensor(root: Tensor, is_leaf_fn=None):
     queue.put(root)
     visited = set()
     graph = Graph(root)
-    # handle custom is_leaf(for subgraph)
+    # handle custom`` is_leaf(for subgraph)
     default_is_leaf = lambda x: x.cached_data is not None
     if is_leaf_fn is None:
         is_leaf = default_is_leaf
