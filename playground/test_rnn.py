@@ -32,9 +32,9 @@ ndl.autograd.LAZY_MODE = True
 ndl.Tensor.__str__ = ndl.Value.__str__
 ndl.Tensor.__repr__ = ndl.Value.__repr__
 
-input_size = 4
-hidden_size = 4
-batch_size = 1
+input_size = 1024
+hidden_size = 1024
+batch_size = 1024
 seq_len = 128
 num_layers = 1
 x = np.random.randn(seq_len, batch_size, input_size).astype(np.float32)
@@ -49,21 +49,23 @@ h: ndl.Tensor
 
 print(graph)
 # Test replace by fused op:
-# topo_order = graph.topo_order()
-# pattern_matching_elementwise(graph)
-# print(graph)
+topo_order = graph.topo_order()
+pattern_matching_elementwise(graph)
 
 # check graph.exec's correctness
 assert all(node.cached_data is None for node in graph.nodes)
-# cor = model(ndl.Tensor(x, device=device)).realize_cached_data()
-# import numpy as np
-# import time
-# import torch
-# torch.cuda.synchronize()
-# t0 = time.time()
-# for i in range(1000):
-#     tmp = graph(*graph.params)
-# t1 = time.time()
-# print("time:", (t1 - t0)/1000)
-# np.testing.assert_allclose(cor.numpy(), tmp.numpy())
-# print("done")
+cor_c, cor_h = model(ndl.Tensor(x, device=device), ndl.Tensor(h0, device=device))
+cor_c, cor_h = cor_c.realize_cached_data(), cor_h.realize_cached_data()
+import numpy as np
+import time
+import torch
+torch.cuda.synchronize()
+t0 = time.time()
+repeat = 1
+for i in range(repeat):
+    my_c, my_h = graph(*graph.params)
+t1 = time.time()
+print("time:", (t1 - t0)/repeat)
+np.testing.assert_allclose(cor_c.numpy(), my_c.numpy())
+np.testing.assert_allclose(cor_h.numpy(), my_h.numpy())
+

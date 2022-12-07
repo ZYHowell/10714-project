@@ -115,7 +115,7 @@ class Graph:
                 tmp =  t.op.compute(*input)
                 torch.cuda.synchronize()
                 toc = time.perf_counter()
-                print(f"compute {t.op} takes {toc - tic:.4f} seconds")
+                # print(f"compute {t.op} takes {toc - tic:.4f} seconds")
                 t.cached_data = tmp
                 val_map[t] = tmp
         return val_map[self.root]
@@ -308,7 +308,6 @@ class Fused(Op):
         device = ndl.cuda()
         cnt = 0
         for (t, freeze_t) in zip(topo_order, freezed_topo_order):
-            time0 = time.time()
             if freeze_t.op is None:
                 continue
             if cnt ==0:
@@ -326,7 +325,6 @@ class Fused(Op):
                     if _should_broadcast_to(s1, s2):
                         raise ValueError("broadcasting to second input is not supported")
                     elif _should_broadcast_to(s2, s1):
-                        print("do broadcast")
                         if (len(s2) < len(s1)):
                             additional_input = additional_input.reshape((1,) * (len(s1) - len(s2)) + s2)
                         additional_input = array_api.broadcast_to(additional_input, s1).compact()
@@ -341,15 +339,14 @@ class Fused(Op):
                 ewise_op_names.append(op_name(t.op))
                 is_scalar_op.append(int(is_ewise_unary(t.op)))
             cnt+=1
-            time1 = time.time()
-            print("prepare time", time1-time0)
         torch.cuda.synchronize()
-        tic = time.time()
-        # device.matmul_fused_bias_relu(matmul_a.compact()._handle, matmul_b.compact()._handle, tensor_input_topo_order[0], out._handle, m, n, p)
-        device.matmul_fused(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
+        if ewise_op_names == ["add", "relu"]:
+            device.matmul_fused_bias_relu(matmul_a.compact()._handle, matmul_b.compact()._handle, tensor_input_topo_order[0], out._handle, m, n, p)
+            # device.matmul_fused(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
+            # device.matmul_fused_two_ewise(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
+        elif ewise_op_names == ["add", "add", "tanh"]:
+            device.matmul_fused_bias_bias_tanh(matmul_a.compact()._handle, matmul_b.compact()._handle, tensor_input_topo_order[0], tensor_input_topo_order[1], out._handle, m, n, p)
         torch.cuda.synchronize()
-        toc = time.time()
-        print("fused time", toc-tic)
         return out
         # return self.graph.exec(*args)
 
@@ -488,7 +485,7 @@ def up_down_look(node: Value, graph: Graph):
 
     # look up from the new root: root = node + neg(param), we need to involve
     # the neg operand into the fused graph
-    fused.update(look_up_from(root, graph))
+    # fused.update(look_up_from(root, graph))
     return fused, root
 
 

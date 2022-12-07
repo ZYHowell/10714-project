@@ -587,6 +587,7 @@ __global__ void MatmulKernelFused(scalar_t **tensor_input,
     }
   }
 }
+
 void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
                  int32_t M, int32_t N, int32_t P,
                  std::vector<std::string> ewise_ops,
@@ -600,7 +601,6 @@ void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
   // handle fused ewise
   int ewise_ops_num = ewise_ops.size();
 
-
   func_t h_Add, h_Mul, h_Div, h_Power, h_Negate, h_Tanh, h_Exp, h_ReLU, h_Log;
   cudaMemcpyFromSymbol(&h_Add, p_Add, sizeof(func_t));
   cudaMemcpyFromSymbol(&h_Mul, p_Mul, sizeof(func_t));
@@ -613,21 +613,34 @@ void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
   cudaMemcpyFromSymbol(&h_Log, p_Log, sizeof(func_t));
 
   const std::unordered_map<std::string, func_t> ewise_func_map = {
-      {"add", h_Add}, {"mul", h_Mul}, {"div", h_Div}, {"add_scalar", h_Add}, {"mul_scalar", h_Mul}, {"div_scalar", h_Div}, {"power_scalar", h_Power}, {"neg", h_Negate}, {"tah", h_Tanh}, {"exp", h_Exp}, {"relu", h_ReLU}, {"log", h_Log}};
+      {"add", h_Add},
+      {"mul", h_Mul},
+      {"div", h_Div},
+      {"add_scalar", h_Add},
+      {"mul_scalar", h_Mul},
+      {"div_scalar", h_Div},
+      {"power_scalar", h_Power},
+      {"neg", h_Negate},
+      {"tah", h_Tanh},
+      {"exp", h_Exp},
+      {"relu", h_ReLU},
+      {"log", h_Log}};
   std::vector<func_t> ewise_ops_func;
   for (const auto &op : ewise_ops) {
     ewise_ops_func.push_back(ewise_func_map.at(op));
   }
 
-  scalar_t** tensor_input_cuda;
-  int* is_scalar_op_cuda;
-  func_t* ewise_ops_cuda;
-  cudaMalloc(&tensor_input_cuda, (ewise_ops_num + 2) * sizeof(scalar_t*));
-  cudaMalloc(&is_scalar_op_cuda, (ewise_ops_num ) * sizeof(int));
-  cudaMalloc(&ewise_ops_cuda, (ewise_ops_num ) * sizeof(func_t));
+  scalar_t **tensor_input_cuda;
+  int *is_scalar_op_cuda;
+  func_t *ewise_ops_cuda;
+  cudaMalloc(&tensor_input_cuda, (ewise_ops_num + 2) * sizeof(scalar_t *));
+  cudaMalloc(&is_scalar_op_cuda, (ewise_ops_num) * sizeof(int));
+  cudaMalloc(&ewise_ops_cuda, (ewise_ops_num) * sizeof(func_t));
   CudaArray scalar_input_cuda(ewise_ops_num + 2);
-  scalar_t **host_tensor_input_ptr = (scalar_t **)std::malloc((ewise_ops_num+2) * sizeof(scalar_t *));
-  scalar_t *host_scalar_input_ptr = (scalar_t *)std::malloc((ewise_ops_num+2) * sizeof(scalar_t));
+  scalar_t **host_tensor_input_ptr =
+      (scalar_t **)std::malloc((ewise_ops_num + 2) * sizeof(scalar_t *));
+  scalar_t *host_scalar_input_ptr =
+      (scalar_t *)std::malloc((ewise_ops_num + 2) * sizeof(scalar_t));
   host_tensor_input_ptr[0] = a.ptr;
   host_tensor_input_ptr[1] = b.ptr;
   for (int i = 0; i < ewise_ops_num; i++) {
@@ -637,27 +650,160 @@ void MatmulFused(const CudaArray &a, const CudaArray &b, CudaArray *out,
       host_tensor_input_ptr[i + 2] = ewise_tensor_input[i].ptr;
     }
   }
-  cudaError_t err =
-      cudaMemcpy(scalar_input_cuda.ptr, host_scalar_input_ptr, (ewise_ops_num + 2) * sizeof(scalar_t), cudaMemcpyHostToDevice);
+  cudaError_t err = cudaMemcpy(scalar_input_cuda.ptr, host_scalar_input_ptr,
+                               (ewise_ops_num + 2) * sizeof(scalar_t),
+                               cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(err));
-  err =
-      cudaMemcpy(tensor_input_cuda, host_tensor_input_ptr, (ewise_ops_num + 2) * sizeof(scalar_t *), cudaMemcpyHostToDevice);
+  err = cudaMemcpy(tensor_input_cuda, host_tensor_input_ptr,
+                   (ewise_ops_num + 2) * sizeof(scalar_t *),
+                   cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(err));
-  err = cudaMemcpy(is_scalar_op_cuda, is_scalar_op.data(), ewise_ops_num * sizeof(int), cudaMemcpyHostToDevice);
+  err = cudaMemcpy(is_scalar_op_cuda, is_scalar_op.data(),
+                   ewise_ops_num * sizeof(int), cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(err));
-  err = cudaMemcpy(ewise_ops_cuda, ewise_ops_func.data(), ewise_ops_num * sizeof(func_t), cudaMemcpyHostToDevice);
+  err = cudaMemcpy(ewise_ops_cuda, ewise_ops_func.data(),
+                   ewise_ops_num * sizeof(func_t), cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     throw std::runtime_error(cudaGetErrorString(err));
 
-  MatmulKernelFused<<<gridDim, blockDim>>>(tensor_input_cuda, scalar_input_cuda.ptr, out->ptr, M, N, P, ewise_ops_cuda, ewise_ops_num, is_scalar_op_cuda);
+  MatmulKernelFused<<<gridDim, blockDim>>>(
+      tensor_input_cuda, scalar_input_cuda.ptr, out->ptr, M, N, P,
+      ewise_ops_cuda, ewise_ops_num, is_scalar_op_cuda);
 
   cudaFree(tensor_input_cuda);
   cudaFree(is_scalar_op_cuda);
   cudaFree(ewise_ops_cuda);
 
+  /// END YOUR SOLUTION
+}
+
+__global__ void
+MatmulKernelFusedTwoEwise(scalar_t *a, scalar_t *b, scalar_t *out, int32_t M,
+                          int32_t N, int32_t P, func_t ewise0, func_t ewise1,
+                          int is_scalar0, int is_scalar1,
+                          scalar_t *ewise_input0, scalar_t *ewise_input1)
+
+{
+  const int S = 32, L = 32, V = 2;
+  __shared__ float sA[S][L], sB[S][L];
+  float C[V][V]{0};
+  float A[V], B[V];
+  for (int ko = 0; ko < N; ko += S) {
+    __syncthreads();
+    for (int i = 0; i < S; i += blockDim.x) {
+      for (int j = 0; j < L; j += blockDim.y) {
+        if ((blockIdx.x * L + j + threadIdx.y) < M &&
+            (ko + i + threadIdx.x) < N) {
+          sA[i + threadIdx.x][j + threadIdx.y] =
+              a[(blockIdx.x * L + j + threadIdx.y) * N +
+                (ko + i + threadIdx.x)];
+        } else {
+          sA[i + threadIdx.x][j + threadIdx.y] = 0;
+        }
+
+        if ((ko + i + threadIdx.x) < N &&
+            (blockIdx.y * L + j + threadIdx.y) < P) {
+          sB[i + threadIdx.x][j + threadIdx.y] =
+              b[(ko + i + threadIdx.x) * P +
+                (blockIdx.y * L + j + threadIdx.y)];
+        } else {
+          sB[i + threadIdx.x][j + threadIdx.y] = 0;
+        }
+      }
+    }
+    __syncthreads();
+    for (int ki = 0; ki < S; ki++) {
+      for (int v = 0; v < V; v++) {
+        A[v] = sA[ki][threadIdx.x * V + v];
+      }
+      for (int v = 0; v < V; v++) {
+        B[v] = sB[ki][threadIdx.y * V + v];
+      }
+      for (int i = 0; i < V; i++) {
+        for (int j = 0; j < V; j++) {
+          C[i][j] += A[i] * B[j];
+        }
+      }
+    }
+  }
+  for (int i = 0; i < V; i++) {
+    for (int j = 0; j < V; j++) {
+      if (((blockIdx.x * blockDim.x + threadIdx.x) * V + i) < M &&
+          ((blockIdx.y * blockDim.y + threadIdx.y) * V + j) < P) {
+        scalar_t tmp = C[i][j];
+        if (is_scalar0) {
+          tmp = ewise0(tmp, 0);
+        } else {
+          tmp = ewise0(
+              tmp,
+              ewise_input0[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) *
+                               P +
+                           (blockIdx.y * blockDim.y + threadIdx.y) * V + j]);
+        }
+        if (is_scalar1) {
+          tmp = ewise1(tmp, 0);
+        } else {
+          tmp = ewise1(
+              tmp,
+              ewise_input1[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) *
+                               P +
+                           (blockIdx.y * blockDim.y + threadIdx.y) * V + j]);
+        }
+        out[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
+            (blockIdx.y * blockDim.y + threadIdx.y) * V + j] = tmp;
+      }
+    }
+  }
+}
+
+void MatmulFusedTwoEwise(const CudaArray &a, const CudaArray &b, CudaArray *out,
+                         int32_t M, int32_t N, int32_t P,
+                         std::vector<std::string> ewise_ops,
+                         std::vector<CudaArray> ewise_tensor_input,
+                         std::vector<scalar_t> ewise_scalar_input,
+                         std::vector<int> is_scalar_op) {
+  size_t grid_x = (M + 32 - 1) / 32;
+  size_t grid_y = (N + 32 - 1) / 32;
+  dim3 gridDim(grid_x, grid_y, 1);
+  dim3 blockDim(16, 16, 1);
+  // handle fused ewise
+  int ewise_ops_num = ewise_ops.size();
+  func_t h_Add, h_Mul, h_Div, h_Power, h_Negate, h_Tanh, h_Exp, h_ReLU, h_Log;
+  cudaMemcpyFromSymbol(&h_Add, p_Add, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Mul, p_Mul, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Div, p_Div, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Power, p_Power, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Negate, p_Negate, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Tanh, p_Tanh, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Exp, p_Exp, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_ReLU, p_ReLU, sizeof(func_t));
+  cudaMemcpyFromSymbol(&h_Log, p_Log, sizeof(func_t));
+
+  const std::unordered_map<std::string, func_t> ewise_func_map = {
+      {"add", h_Add},
+      {"mul", h_Mul},
+      {"div", h_Div},
+      {"add_scalar", h_Add},
+      {"mul_scalar", h_Mul},
+      {"div_scalar", h_Div},
+      {"power_scalar", h_Power},
+      {"neg", h_Negate},
+      {"tah", h_Tanh},
+      {"exp", h_Exp},
+      {"relu", h_ReLU},
+      {"log", h_Log}};
+  std::vector<func_t> ewise_ops_func;
+  for (const auto &op : ewise_ops) {
+    ewise_ops_func.push_back(ewise_func_map.at(op));
+  }
+
+  MatmulKernelFusedTwoEwise<<<gridDim, blockDim>>>(
+      a.ptr, b.ptr, out->ptr, M, N, P, ewise_ops_func[0], ewise_ops_func[1],
+      is_scalar_op[0], is_scalar_op[1], ewise_tensor_input[0].ptr,
+      ewise_tensor_input[1].ptr);
   /// END YOUR SOLUTION
 }
 
@@ -751,8 +897,104 @@ void Matmul(const CudaArray &a, const CudaArray &b, CudaArray *out, int32_t M,
 
   /// END YOUR SOLUTION
 }
-__global__ void MatmulKernel(const scalar_t *a, const scalar_t *b, const scalar_t *d,
-                             scalar_t *out, int32_t M, int32_t N, int32_t P)
+__global__ void MatmulBiasReLUKernel(const scalar_t *a, const scalar_t *b,
+                             const scalar_t *d, scalar_t *out, int32_t M,
+                             int32_t N, int32_t P) {
+  const int S = 32, L = 32, V = 2;
+  __shared__ float sA[S][L], sB[S][L];
+  float C[V][V]{0};
+  float A[V], B[V];
+  for (int ko = 0; ko < N; ko += S) {
+    __syncthreads();
+    for (int i = 0; i < S; i += blockDim.x) {
+      for (int j = 0; j < L; j += blockDim.y) {
+        if ((blockIdx.x * L + j + threadIdx.y) < M &&
+            (ko + i + threadIdx.x) < N) {
+          sA[i + threadIdx.x][j + threadIdx.y] =
+              a[(blockIdx.x * L + j + threadIdx.y) * N +
+                (ko + i + threadIdx.x)];
+        } else {
+          sA[i + threadIdx.x][j + threadIdx.y] = 0;
+        }
+
+        if ((ko + i + threadIdx.x) < N &&
+            (blockIdx.y * L + j + threadIdx.y) < P) {
+          sB[i + threadIdx.x][j + threadIdx.y] =
+              b[(ko + i + threadIdx.x) * P +
+                (blockIdx.y * L + j + threadIdx.y)];
+        } else {
+          sB[i + threadIdx.x][j + threadIdx.y] = 0;
+        }
+      }
+    }
+    __syncthreads();
+    for (int ki = 0; ki < S; ki++) {
+      for (int v = 0; v < V; v++) {
+        A[v] = sA[ki][threadIdx.x * V + v];
+      }
+      for (int v = 0; v < V; v++) {
+        B[v] = sB[ki][threadIdx.y * V + v];
+      }
+      for (int i = 0; i < V; i++) {
+        for (int j = 0; j < V; j++) {
+          C[i][j] += A[i] * B[j];
+        }
+      }
+    }
+  }
+  for (int i = 0; i < V; i++) {
+    for (int j = 0; j < V; j++) {
+      if (((blockIdx.x * blockDim.x + threadIdx.x) * V + i) < M &&
+          ((blockIdx.y * blockDim.y + threadIdx.y) * V + j) < P) {
+        scalar_t tmp =
+            C[i][j] + d[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
+                        (blockIdx.y * blockDim.y + threadIdx.y) * V + j];
+        out[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
+            (blockIdx.y * blockDim.y + threadIdx.y) * V + j] =
+            tmp > 0 ? tmp : 0;
+      }
+    }
+  }
+}
+void MatmulFusedBiasReLU(const CudaArray &a, const CudaArray &b,
+                         const CudaArray &d, CudaArray *out, int32_t M,
+                         int32_t N, int32_t P) {
+  /**
+   * Multiply two (compact) matrices into an output (also comapct) matrix.  You
+   * will want to look at the lecture and notes on GPU-based linear algebra to
+   * see how to do this.  Since ultimately mugrade is just evaluating
+   * correctness, you _can_ implement a version that simply parallelizes over
+   * (i,j) entries in the output array.  However, to really get the full benefit
+   * of this problem, we would encourage you to use cooperative fetching, shared
+   * memory register tiling, and other ideas covered in the class notes.  Note
+   * that unlike the tiled matmul function in the CPU backend, here you should
+   * implement a single function that works across all size matrices, whether or
+   * not they are a multiple of a tile size.  As with previous CUDA
+   * implementations, this function here will largely just set up the kernel
+   * call, and you should implement the logic in a separate MatmulKernel() call.
+   *
+   *
+   * Args:
+   *   a: compact 2D array of size m x n
+   *   b: comapct 2D array of size n x p
+   *   out: compact 2D array of size m x p to write the output to
+   *   M: rows of a / out
+   *   N: columns of a / rows of b
+   *   P: columns of b / out
+   */
+
+  /// BEGIN YOUR SOLUTION
+  size_t grid_x = (M + 32 - 1) / 32;
+  size_t grid_y = (N + 32 - 1) / 32;
+  dim3 gridDim(grid_x, grid_y, 1);
+  dim3 blockDim(16, 16, 1);
+  MatmulBiasReLUKernel<<<gridDim, blockDim>>>(a.ptr, b.ptr, d.ptr, out->ptr, M, N, P);
+  /// END YOUR SOLUTION
+}
+
+__global__ void MatmulBiasBiasTanhKernel(const scalar_t *a, const scalar_t *b,
+                                     const scalar_t *d, const scalar_t* e, scalar_t *out, int32_t M,
+                                     int32_t N, int32_t P)
 {
   const int S = 32, L = 32, V = 2;
   __shared__ float sA[S][L], sB[S][L];
@@ -817,48 +1059,28 @@ __global__ void MatmulKernel(const scalar_t *a, const scalar_t *b, const scalar_
       if (((blockIdx.x * blockDim.x + threadIdx.x) * V + i) < M &&
           ((blockIdx.y * blockDim.y + threadIdx.y) * V + j) < P)
       {
-        scalar_t tmp = C[i][j] + d[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
-                                 (blockIdx.y * blockDim.y + threadIdx.y) * V + j];
+        scalar_t tmp =
+            C[i][j] + d[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
+                        (blockIdx.y * blockDim.y + threadIdx.y) * V + j];
+        tmp = tmp + e[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
+                      (blockIdx.y * blockDim.y + threadIdx.y) * V + j];
         out[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
-            (blockIdx.y * blockDim.y + threadIdx.y) * V + j] =  tmp>0?tmp:0;
+            (blockIdx.y * blockDim.y + threadIdx.y) * V + j] = tanh(tmp);
       }
     }
   }
 }
-void MatmulFusedBiasReLU(const CudaArray &a, const CudaArray &b, const CudaArray& d, CudaArray *out, int32_t M,
-            int32_t N, int32_t P)
+void MatmulFusedBiasBiasTanh(const CudaArray &a, const CudaArray &b,
+                         const CudaArray &d, const CudaArray& e, CudaArray *out, int32_t M,
+                         int32_t N, int32_t P)
 {
-  /**
-   * Multiply two (compact) matrices into an output (also comapct) matrix.  You
-   * will want to look at the lecture and notes on GPU-based linear algebra to
-   * see how to do this.  Since ultimately mugrade is just evaluating
-   * correctness, you _can_ implement a version that simply parallelizes over
-   * (i,j) entries in the output array.  However, to really get the full benefit
-   * of this problem, we would encourage you to use cooperative fetching, shared
-   * memory register tiling, and other ideas covered in the class notes.  Note
-   * that unlike the tiled matmul function in the CPU backend, here you should
-   * implement a single function that works across all size matrices, whether or
-   * not they are a multiple of a tile size.  As with previous CUDA
-   * implementations, this function here will largely just set up the kernel
-   * call, and you should implement the logic in a separate MatmulKernel() call.
-   *
-   *
-   * Args:
-   *   a: compact 2D array of size m x n
-   *   b: comapct 2D array of size n x p
-   *   out: compact 2D array of size m x p to write the output to
-   *   M: rows of a / out
-   *   N: columns of a / rows of b
-   *   P: columns of b / out
-   */
 
   /// BEGIN YOUR SOLUTION
   size_t grid_x = (M + 32 - 1) / 32;
   size_t grid_y = (N + 32 - 1) / 32;
   dim3 gridDim(grid_x, grid_y, 1);
   dim3 blockDim(16, 16, 1);
-  MatmulKernel<<<gridDim, blockDim>>>(a.ptr, b.ptr, d.ptr, out->ptr, M, N, P);
-
+  MatmulBiasBiasTanhKernel<<<gridDim, blockDim>>>(a.ptr, b.ptr, d.ptr, e.ptr, out->ptr, M, N, P);
   /// END YOUR SOLUTION
 }
 ////////////////////////////////////////////////////////////////////////////////
@@ -998,6 +1220,8 @@ PYBIND11_MODULE(ndarray_backend_cuda, m) {
   m.def("matmul", Matmul);
   m.def("matmul_fused", MatmulFused);
   m.def("matmul_fused_bias_relu", MatmulFusedBiasReLU);
+  m.def("matmul_fused_two_ewise", MatmulFusedTwoEwise);
+  m.def("matmul_fused_bias_bias_tanh", MatmulFusedBiasBiasTanh);
   m.def("reduce_max", ReduceMax);
   m.def("reduce_sum", ReduceSum);
 }
