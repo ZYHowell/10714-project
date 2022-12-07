@@ -345,6 +345,7 @@ class Fused(Op):
             print("prepare time", time1-time0)
         torch.cuda.synchronize()
         tic = time.time()
+        # device.matmul_fused_bias_relu(matmul_a.compact()._handle, matmul_b.compact()._handle, tensor_input_topo_order[0], out._handle, m, n, p)
         device.matmul_fused(matmul_a.compact()._handle, matmul_b.compact()._handle, out._handle, m, n, p, ewise_op_names,  tensor_input_topo_order, scalar_input_topo_order, is_scalar_op,)
         torch.cuda.synchronize()
         toc = time.time()

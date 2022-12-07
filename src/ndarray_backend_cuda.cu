@@ -751,7 +751,116 @@ void Matmul(const CudaArray &a, const CudaArray &b, CudaArray *out, int32_t M,
 
   /// END YOUR SOLUTION
 }
+__global__ void MatmulKernel(const scalar_t *a, const scalar_t *b, const scalar_t *d,
+                             scalar_t *out, int32_t M, int32_t N, int32_t P)
+{
+  const int S = 32, L = 32, V = 2;
+  __shared__ float sA[S][L], sB[S][L];
+  float C[V][V]{0};
+  float A[V], B[V];
+  for (int ko = 0; ko < N; ko += S)
+  {
+    __syncthreads();
+    for (int i = 0; i < S; i += blockDim.x)
+    {
+      for (int j = 0; j < L; j += blockDim.y)
+      {
+        if ((blockIdx.x * L + j + threadIdx.y) < M &&
+            (ko + i + threadIdx.x) < N)
+        {
+          sA[i + threadIdx.x][j + threadIdx.y] =
+              a[(blockIdx.x * L + j + threadIdx.y) * N +
+                (ko + i + threadIdx.x)];
+        }
+        else
+        {
+          sA[i + threadIdx.x][j + threadIdx.y] = 0;
+        }
 
+        if ((ko + i + threadIdx.x) < N &&
+            (blockIdx.y * L + j + threadIdx.y) < P)
+        {
+          sB[i + threadIdx.x][j + threadIdx.y] =
+              b[(ko + i + threadIdx.x) * P +
+                (blockIdx.y * L + j + threadIdx.y)];
+        }
+        else
+        {
+          sB[i + threadIdx.x][j + threadIdx.y] = 0;
+        }
+      }
+    }
+    __syncthreads();
+    for (int ki = 0; ki < S; ki++)
+    {
+      for (int v = 0; v < V; v++)
+      {
+        A[v] = sA[ki][threadIdx.x * V + v];
+      }
+      for (int v = 0; v < V; v++)
+      {
+        B[v] = sB[ki][threadIdx.y * V + v];
+      }
+      for (int i = 0; i < V; i++)
+      {
+        for (int j = 0; j < V; j++)
+        {
+          C[i][j] += A[i] * B[j];
+        }
+      }
+    }
+  }
+  for (int i = 0; i < V; i++)
+  {
+    for (int j = 0; j < V; j++)
+    {
+      if (((blockIdx.x * blockDim.x + threadIdx.x) * V + i) < M &&
+          ((blockIdx.y * blockDim.y + threadIdx.y) * V + j) < P)
+      {
+        scalar_t tmp = C[i][j] + d[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
+                                 (blockIdx.y * blockDim.y + threadIdx.y) * V + j];
+        out[((blockIdx.x * blockDim.x + threadIdx.x) * V + i) * P +
+            (blockIdx.y * blockDim.y + threadIdx.y) * V + j] =  tmp>0?tmp:0;
+      }
+    }
+  }
+}
+void MatmulFusedBiasReLU(const CudaArray &a, const CudaArray &b, const CudaArray& d, CudaArray *out, int32_t M,
+            int32_t N, int32_t P)
+{
+  /**
+   * Multiply two (compact) matrices into an output (also comapct) matrix.  You
+   * will want to look at the lecture and notes on GPU-based linear algebra to
+   * see how to do this.  Since ultimately mugrade is just evaluating
+   * correctness, you _can_ implement a version that simply parallelizes over
+   * (i,j) entries in the output array.  However, to really get the full benefit
+   * of this problem, we would encourage you to use cooperative fetching, shared
+   * memory register tiling, and other ideas covered in the class notes.  Note
+   * that unlike the tiled matmul function in the CPU backend, here you should
+   * implement a single function that works across all size matrices, whether or
+   * not they are a multiple of a tile size.  As with previous CUDA
+   * implementations, this function here will largely just set up the kernel
+   * call, and you should implement the logic in a separate MatmulKernel() call.
+   *
+   *
+   * Args:
+   *   a: compact 2D array of size m x n
+   *   b: comapct 2D array of size n x p
+   *   out: compact 2D array of size m x p to write the output to
+   *   M: rows of a / out
+   *   N: columns of a / rows of b
+   *   P: columns of b / out
+   */
+
+  /// BEGIN YOUR SOLUTION
+  size_t grid_x = (M + 32 - 1) / 32;
+  size_t grid_y = (N + 32 - 1) / 32;
+  dim3 gridDim(grid_x, grid_y, 1);
+  dim3 blockDim(16, 16, 1);
+  MatmulKernel<<<gridDim, blockDim>>>(a.ptr, b.ptr, d.ptr, out->ptr, M, N, P);
+
+  /// END YOUR SOLUTION
+}
 ////////////////////////////////////////////////////////////////////////////////
 // Max and sum reductions
 ////////////////////////////////////////////////////////////////////////////////
@@ -888,6 +997,7 @@ PYBIND11_MODULE(ndarray_backend_cuda, m) {
 
   m.def("matmul", Matmul);
   m.def("matmul_fused", MatmulFused);
+  m.def("matmul_fused_bias_relu", MatmulFusedBiasReLU);
   m.def("reduce_max", ReduceMax);
   m.def("reduce_sum", ReduceSum);
 }
