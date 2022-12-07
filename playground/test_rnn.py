@@ -2,6 +2,7 @@ import numpy as np
 
 import needle as ndl
 from needle import nn, init
+from needle.ops import make_tuple
 from needle.graph import build_graph_from_tensor, pattern_matching_elementwise
 
 from needle.nn import RNN
@@ -28,6 +29,8 @@ class Model(nn.Module):
 device = ndl.cuda()
 dtype = "float32"
 ndl.autograd.LAZY_MODE = True
+ndl.Tensor.__str__ = ndl.Value.__str__
+ndl.Tensor.__repr__ = ndl.Value.__repr__
 
 input_size = 4
 hidden_size = 4
@@ -38,11 +41,10 @@ x = np.random.randn(seq_len, batch_size, input_size).astype(np.float32)
 h0 = np.random.randn(num_layers, batch_size, hidden_size).astype(np.float32)
 model = RNN(input_size, hidden_size, device=device, dtype=dtype)
 c,h = model(ndl.Tensor(x, device=device), ndl.Tensor(h0, device=device))
+output = make_tuple(c, h)
 
-graph = build_graph_from_tensor(h)
+graph = build_graph_from_tensor(output)
 
-ndl.Tensor.__str__ = ndl.Value.__str__
-ndl.Tensor.__repr__ = ndl.Value.__repr__
 h: ndl.Tensor
 
 print(graph)

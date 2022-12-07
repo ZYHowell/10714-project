@@ -776,6 +776,7 @@ register_op(Dilate, "dilate")
 register_op(UnDilate, "undilate")
 register_op(Conv, "conv")
 
+register_op(TensorTupleOp, "tuple")
 
 ##### Shape related operations
 @dataclass

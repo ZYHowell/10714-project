@@ -374,14 +374,15 @@ def build_graph_from_tensor(root: Tensor, is_leaf_fn=None):
         if node.inputs is None:
             continue
         for input_tensor in node.inputs:
-            if is_leaf(input_tensor):
-                graph.add_param(input_tensor, node)
-            elif input_tensor in visited:
+            if input_tensor in visited:
+                graph.add_user(input_tensor, node)
                 continue
+            elif is_leaf(input_tensor):
+                graph.add_param(input_tensor, node)
             else:
                 graph.add_node(input_tensor, node)
                 queue.put(input_tensor)
-                visited.add(input_tensor)
+            visited.add(input_tensor)
     return graph
 
 
