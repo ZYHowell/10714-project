@@ -293,10 +293,7 @@ class Fused(Op):
         val_map = {}
         assert len(args) == len(self.graph.params)
         def map_or_cached(val: Value):
-            if val in self.graph.params:
-                return val_map[val]
-            return None
-
+            return val_map[val]
         for p, v in zip(self.graph.params, args):
             val_map[p] = v        
         device = ndl.cuda()
