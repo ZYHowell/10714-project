@@ -804,10 +804,10 @@ def matmul_transition(*args):
     maybe_s1 = s0[:-2] + s1[-2:]
     # TODO(hongyi): add more return value if there is a broadcast
     if _should_broadcast_to(s0, maybe_s0):
-        return AbstractArray(maybe_s0[-1:] + s1[-1:], aval_0.dtype)
+        return AbstractArray(maybe_s0[:-1] + s1[-1:], aval_0.dtype)
     if _should_broadcast_to(s1, maybe_s1):
-        return AbstractArray(s0[-1:] + s1[:-1], aval_0.dtype)
-    return AbstractArray(s0[-1:] + s1[:-1], aval_0.dtype)
+        return AbstractArray(s0[:-1] + s1[-1:], aval_0.dtype)
+    return AbstractArray(s0[:-1] + s1[-1:], aval_0.dtype)
 
 
 register_shape_transition(MatMul, matmul_transition)
